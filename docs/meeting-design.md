@@ -1,7 +1,7 @@
 # 会议纪要应用（`sdemo.meeting`）
 
 > 状态：设计稿，2026-10-29
-> 关联：[工作台规划](../../../docs/workbench-roadmap.md) · [知识库版本与追溯](../../Kb/docs/kb-versioning.md) · [待办 MCP 工具面](../../Planner/docs/planner-mcp-surface.md)
+> 关联：[工作台规划](../../../docs/workbench-roadmap.md) · [知识库版本与追溯](../../../Kb/docs/kb-versioning.md) · [待办 MCP 工具面](../../Planner/docs/planner-mcp-surface.md)
 > 修订：推翻早晚两版「会议是 planner 的一个模块」的判断（理由见 §1）
 
 ---
