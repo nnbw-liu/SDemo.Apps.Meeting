@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>sdemo.meeting · 录音组件</title>
+<link rel="stylesheet" href="sdemo-ui.css">
+<link rel="stylesheet" href="meeting.css">
+</head>
+<body>
+<div class="desktop">
+  <div>
+    <div class="widget">
+      <div class="widget-top">
+        <span class="pulse"></span>录音中 · 麦克风
+        <span style="margin-left:auto">48 kHz</span>
+      </div>
+      <div class="widget-time">00:12:34</div>
+      <div class="widget-title">产品例会 · 2026-11-15</div>
+      <div class="widget-actions">
+        <button class="widget-btn"><svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x='7' y='5' width='3.5' height='14' rx='1'/><rect x='13.5' y='5' width='3.5' height='14' rx='1'/></svg>暂停</button>
+        <button class="widget-btn stop"><svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x='6' y='6' width='12' height='12' rx='2'/></svg>结束</button>
+      </div>
+      <div class="widget-foot">结束会自动转写，之后在会议列表里出纪要</div>
+    </div>
+    <div class="caption">
+      半透明、置顶、不抢焦点；点一下回到主窗口。<br>
+      与待办小组件同一套 <span style="font-family:monospace">native</span> 组件机制。
+    </div>
+  </div>
+</div>
+</body>
+</html>

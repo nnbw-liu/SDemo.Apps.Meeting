@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>sdemo.meeting · 待办候选</title>
+<link rel="stylesheet" href="sdemo-ui.css">
+<link rel="stylesheet" href="meeting.css">
+</head>
+<body>
+<div class="app-shell">
+  
+    <aside class="sidebar">
+      <a class="brand" href="#">
+        <span class="brand-mark">M<span>.</span></span>
+        <span class="brand-copy"><strong>会议</strong><small>sdemo.meeting · 本地</small></span>
+      </a>
+
+      <div class="nav-group-label">会议</div>
+      <div class="nav">
+        <a class="nav-item" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x='3' y='5' width='18' height='16' rx='2.5'/><path d='M8 3v4M16 3v4M3 10h18'/></svg>全部会议<span class="chip-count">24</span></a>
+        <a class="nav-item" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x='9' y='3' width='6' height='11' rx='3'/><path d='M5 11a7 7 0 0 0 14 0'/><path d='M12 18v3'/></svg><span class="pulse"></span>进行中</a>
+        <a class="nav-item active" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='M4 13h4l1.5 3h5L16 13h4'/><path d='M5 5h14l2 8v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4z'/></svg>待确认<span class="chip-count">2</span></a>
+        <a class="nav-item" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='m5 12 4.5 4.5L19 7'/></svg>已归档</a>
+      </div>
+
+      <div class="nav-group-label">类型</div>
+      <div class="nav">
+        <a class="nav-item" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='m12 3 9 5-9 5-9-5z'/><path d='m3 13 9 5 9-5'/><path d='m3 17 9 5 9-5'/></svg>周会</a>
+        <a class="nav-item" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx='9' cy='8' r='3.2'/><path d='M3.5 20a5.5 5.5 0 0 1 11 0'/><path d='M16 5.2a3.2 3.2 0 0 1 0 6.1'/><path d='M17.5 14.2A5.5 5.5 0 0 1 21 20'/></svg>客户沟通</a>
+        <a class="nav-item" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='M9 7H5.5A2.5 2.5 0 0 0 3 9.5v3A2.5 2.5 0 0 0 5.5 15H7v1.5A2.5 2.5 0 0 1 4.5 19'/><path d='M20 7h-3.5A2.5 2.5 0 0 0 14 9.5v3A2.5 2.5 0 0 0 16.5 15H18v1.5A2.5 2.5 0 0 1 15.5 19'/></svg>1:1</a>
+        <a class="nav-item" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='M20 12a8 8 0 1 1-2.3-5.7'/><path d='M20 4v5h-5'/></svg>复盘</a>
+      </div>
+
+      <div class="nav-group-label">其它</div>
+      <div class="nav">
+        <a class="nav-item" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='M4 7h16'/><path d='M9 7V4h6v3'/><path d='M6 7l1 13h10l1-13'/><path d='M10 11v5M14 11v5'/></svg>回收站</a>
+        <a class="nav-item" href="#"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx='12' cy='12' r='3'/><path d='M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z'/></svg>设置</a>
+      </div>
+
+      <div class="sidebar-spacer"></div>
+
+      <div class="sidebar-note">
+        <div class="sidebar-note-icon"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx='12' cy='6' rx='7.5' ry='3'/><path d='M4.5 6v6c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3V6'/><path d='M4.5 12v6c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3v-6'/></svg></div>
+        <div>
+          <strong>2 场会议待确认</strong>
+          <p>确认后结论与转写一并归档到知识库。</p>
+        </div>
+      </div>
+
+      <div class="sidebar-foot">
+        <div class="avatar">L</div>
+        <div class="sidebar-foot-copy">
+          <strong>本地 · 仅本机</strong>
+          <small>v0.1.0 · 3.6 GB</small>
+        </div>
+        <button class="icon-btn" title="主题"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'/></svg></button>
+      </div>
+    </aside>
+    
+  <div class="main-column">
+    <header class="topbar">
+      <div class="topbar-title">
+        <span class="eyebrow">sdemo.meeting</span>
+        <h1>待办候选</h1>
+        <p class="topbar-desc">会议只产出候选；安排给谁、什么时候做，由 Agent 带着 Planner 的上下文来定。</p>
+      </div>
+      <div class="topbar-actions"><button class="btn btn-ghost btn-sm"><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx='9' cy='8' r='3.2'/><path d='M3.5 20a5.5 5.5 0 0 1 11 0'/><path d='M16 5.2a3.2 3.2 0 0 1 0 6.1'/><path d='M17.5 14.2A5.5 5.5 0 0 1 21 20'/></svg>按负责人</button><button class="btn btn-primary"><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='M21 3 10.5 13.5'/><path d='M21 3l-7 18-3.5-7.5L3 10z'/></svg>交给 Agent 安排</button></div>
+    </header>
+    
+    <main class="content">
+      <div class="act-split">
+        <div>
+          <div class="hstack" style="margin-bottom:14px">
+            <span class="section-title" style="margin:0">来自「周会 · 部署方案评审」的候选</span>
+            <span class="status-pill">3 条 · 已选 2 条</span>
+            <span class="push-right"></span>
+            <button class="btn btn-ghost btn-sm"><svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='M3 5h18l-7 8v6l-4 2v-8z'/></svg>按议题</button>
+          </div>
+          <div class="vstack">
+            
+      <div class="cand-row on">
+        <span class="check-box"><svg class="icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='m5 12 4.5 4.5L19 7'/></svg></span>
+        <div>
+          <div class="mtg-title" style="font-size:12.5px">补回滚演练记录</div>
+          <div class="mtg-meta">王五 · 下周三前 · 议题 1 客户 A 需求变更 · 引自 00:13:41</div>
+        </div>
+        <span class="status-pill is-accent">待安排</span>
+      </div>
+            
+      <div class="cand-row on">
+        <span class="check-box"><svg class="icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='m5 12 4.5 4.5L19 7'/></svg></span>
+        <div>
+          <div class="mtg-title" style="font-size:12.5px">灰度方案写进验收标准</div>
+          <div class="mtg-meta">我 · 本周 · 议题 1 客户 A 需求变更 · 引自 00:13:35</div>
+        </div>
+        <span class="status-pill is-accent">待安排</span>
+      </div>
+            
+      <div class="cand-row">
+        <span class="check-box"><svg class="icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='m5 12 4.5 4.5L19 7'/></svg></span>
+        <div>
+          <div class="mtg-title" style="font-size:12.5px">周会排期改到周四</div>
+          <div class="mtg-meta">我 · 议题 3 下周排期 · 引自 00:33:12</div>
+        </div>
+        <span class="status-pill is-accent">待安排</span>
+      </div>
+          </div>
+
+          <div class="callout warn" style="margin-top:16px">
+            <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='M12 4 21 20H3z'/><path d='M12 10v4'/><circle cx='12' cy='17.4' r='.9'/></svg>
+            <div>候选不等于待办。会议里「说了但没定」的事不会因为出现在这里就变成承诺，
+            所以这一步只是把它们交给 Agent，由它带着 Planner 的上下文判断重复与优先级。</div>
+          </div>
+
+          <div class="flow">
+            <div class="flow-step now"><b>1 · 候选</b>会议只写 mtg_action，status=candidate</div>
+            <div class="flow-step"><b>2 · Agent 编排</b>判重、合并、按清单优先级排</div>
+            <div class="flow-step"><b>3 · Planner 审阅</b>草稿在你手里逐条 ✓ / ✎ / ✕</div>
+            <div class="flow-step"><b>4 · 回写</b>Agent 记 plannerRef，候选转「已安排」</div>
+          </div>
+        </div>
+
+        <div class="agent-card">
+          <div class="agent-head">
+            <span class="agent-mark">A</span>
+            <div style="flex:1">
+              <strong style="font-size:12.5px">DesktopAgent 请求执行</strong>
+              <div class="muted" style="font-size:10.5px">2 个动作 · 中风险 · 需要你确认一次</div>
+            </div>
+            <span class="status-pill is-accent">待审批</span>
+          </div>
+          <div class="agent-body">
+            <div class="agent-step"><span class="idx">1</span>
+              <div><b>planner.todo_create_draft</b> × 2<br>
+              <span class="muted">按现有清单判重、合并，生成草稿</span></div>
+            </div>
+            <div class="agent-step"><span class="idx">2</span>
+              <div><b>meeting.patch</b> × 2<br>
+              <span class="muted">回写 <span class="tc">planner/todo/…</span>，候选转「已安排」</span></div>
+            </div>
+            <hr class="sep">
+            <div class="callout" style="font-size:11px">
+              <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx='12' cy='12' r='9'/><path d='M12 11v5'/><circle cx='12' cy='7.8' r='.9'/></svg>
+              <div>草稿不会直接入库。你会在 Planner 的界面里逐条审阅，那里才知道清单里已经有什么。</div>
+            </div>
+            <div class="hstack" style="margin-top:12px">
+              <button class="btn btn-primary btn-sm" style="flex:1"><svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d='m5 12 4.5 4.5L19 7'/></svg>允许并审阅草稿</button>
+              <button class="btn btn-ghost btn-sm">拒绝</button>
+            </div>
+            <div class="muted" style="margin-top:9px;font-size:10px;text-align:center">
+              记住本会话 · 之后同类动作不再询问
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+    
+    
+  </div>
+</div>
+</body>
+</html>

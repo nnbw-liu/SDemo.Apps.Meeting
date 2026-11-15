@@ -12,7 +12,7 @@
 
 ## 开工先做三件事
 
-1. 先补 `docs/asr-runtime.md`（whisper 模型分发、校验、耗时档位）——这是本产品最大的未知。
+1. `docs/asr-runtime.md` 已出 v0.3（[链接](docs/asr-runtime.md)）：**whisper 是主力，Qwen3-ASR 是升级档**。先做阶段 A→B（whisper 跑通并生产化），阶段 C 是升级档的 go/no-go，可与 B 并行但不阻塞主干。
 2. 按五件套建工程：`src/SDemo.App.Meeting.{Contracts,Storage,Core,Mcp,Host}`（另加 `Asr` / `Audio`）。
 3. 建 `SDemo.Meeting.slnf`；在父仓 `workspaces/meeting.json` 把 `status` 改 `active`。
 
@@ -22,6 +22,7 @@
 | --- | --- |
 | 需求与验收 | [docs/requirements.md](docs/requirements.md) |
 | 会议领域模型 | [docs/meeting-design.md](docs/meeting-design.md) |
+| **ASR 运行时与开发计划（v0.3，whisper 主力 / Qwen3 升级档（chat-audio 形态））** | [docs/asr-runtime.md](docs/asr-runtime.md) |
 | 跨应用联动（候选转待办） | [../../docs/integration.md](../../docs/integration.md) §3 |
 | 组件与宿主 | [../../docs/contracts/](../../docs/contracts/) |
 
