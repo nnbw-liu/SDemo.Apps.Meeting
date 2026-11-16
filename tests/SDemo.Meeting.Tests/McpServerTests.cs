@@ -79,6 +79,7 @@ public sealed class McpServerTests : IDisposable
 
         foreach (var tool in writes)
         {
+            Assert.NotNull(tool);
             Assert.Equal("medium", tool["_meta"]!["sdemo/risk"]!.GetValue<string>());
             Assert.Equal("once", tool["_meta"]!["sdemo/approval"]!.GetValue<string>());
             Assert.True(tool["_meta"]!["sdemo/writes"]!.GetValue<bool>());

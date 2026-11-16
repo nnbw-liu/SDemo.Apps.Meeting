@@ -10,8 +10,7 @@
       "src\\SDemo.App.Meeting.Mcp\\SDemo.App.Meeting.Mcp.csproj",
       "src\\SDemo.App.Meeting.Host\\SDemo.App.Meeting.Host.csproj",
       "tests\\SDemo.Meeting.Tests\\SDemo.Meeting.Tests.csproj",
-      "src\\SDemo.App.Meeting.Web\\SDemo.App.Meeting.Web.csproj",
-      "src\\SDemo.App.Meeting.Viewer\\SDemo.App.Meeting.Viewer.csproj"
+      "src\\SDemo.App.Meeting.Web\\SDemo.App.Meeting.Web.csproj"
     ]
   }
 }

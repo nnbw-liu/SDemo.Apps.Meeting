@@ -1,6 +1,10 @@
 using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Windows;
+using Microsoft.Extensions.DependencyInjection;
 using SDemo.App.Meeting.Asr;
 using SDemo.App.Meeting.Audio;
 using SDemo.App.Meeting.Contracts;
@@ -11,12 +15,91 @@ using SDemo.App.Meeting.Storage;
 namespace SDemo.App.Meeting.Host;
 
 /// <summary>
-/// 阶段 A 的组合根：CLI 跑通「录 → 转 → 存」。
-/// 界面（WPF）与 MCP server 是后续阶段，这里只保证数据面正确。
+/// 双模入口：无参数 → WPF 主窗口（进程内起 MCP）；带参数 → CLI（给脚本/CI 用）。
+/// 主窗口是产品形态，CLI 是调试与自动化的旁路，两者共用 <see cref="MeetingHost"/>。
 /// </summary>
 public static class Program
 {
-    public static async Task<int> Main(string[] args)
+    private const string MutexName = "SDemo.App.sdemo.meeting";
+    private const uint AttachParentProcess = 0xFFFFFFFF;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(uint processId);
+
+    [STAThread]
+    public static int Main(string[] args)
+    {
+        if (args.Length == 0 || args[0].Equals("--gui", StringComparison.OrdinalIgnoreCase))
+            return RunGui(Options.Parse(args.Length == 0 ? new[] { "app" } : args));
+
+        // WinExe 默认没有控制台；接回调用方的终端，否则 CLI 输出会消失
+        AttachConsole(AttachParentProcess);
+        return RunCliAsync(args).GetAwaiter().GetResult();
+    }
+
+    private static int RunGui(Options options)
+    {
+        var instance = options.Str("instance");
+        var mutexName = instance is null ? MutexName : $"{MutexName}.{instance}";
+
+        using var mutex = new Mutex(initiallyOwned: true, mutexName, out var createdNew);
+        if (!createdNew)
+        {
+            // 不弹框：Hub 可能重复拉起，弹窗会卡住自动启动；日志留痕即可
+            Log($"已有实例在运行（{mutexName}），第二个进程退出");
+            return 0;
+        }
+
+        MeetingHost? host = null;
+        try
+        {
+            var dataDir = options.Str("data-dir");
+            Log($"启动：打开数据目录（{dataDir ?? "默认"}）");
+            host = MeetingHost.Open(dataDir);
+            var services = host.BuildServices();
+            var port = host.StartMcp(port: options.Int("port", 0));
+            Log($"MCP 已在进程内启动：127.0.0.1:{port}");
+
+            var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+            var window = new MainWindow(services);
+            app.MainWindow = window;
+            Log("窗口已创建，进入消息循环");
+
+            // 窗口关掉就退出；MCP 由 finally 里的 host.Dispose 收尾（runtime 文件转 stopped）
+            var code = app.Run(window);
+            Log($"消息循环结束 code={code}");
+            return code;
+        }
+        catch (Exception ex)
+        {
+            Log($"启动失败：{ex}");
+            MessageBox.Show($"会议启动失败：\n{ex.Message}", "会议", MessageBoxButton.OK, MessageBoxImage.Error);
+            return 1;
+        }
+        finally
+        {
+            host?.Dispose();
+            Log("已释放组合根");
+        }
+    }
+
+    internal static void Log(string message)
+    {
+        try
+        {
+            var dir = MeetingConstants.ResolveDataDir();
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(
+                Path.Combine(dir, "meeting.log"),
+                $"{DateTimeOffset.Now:MM-dd HH:mm:ss.fff} [{Environment.ProcessId}] {message}{Environment.NewLine}");
+        }
+        catch
+        {
+            // 日志失败不能影响主流程
+        }
+    }
+
+    public static async Task<int> RunCliAsync(string[] args)
     {
         try { Console.OutputEncoding = Encoding.UTF8; } catch { /* 部分终端不支持 */ }
 
@@ -31,7 +114,7 @@ public static class Program
 
         try
         {
-            using var app = MeetingApp.Open();
+            using var app = MeetingHost.Open(o.Str("data-dir"));
 
             return cmd switch
             {
@@ -63,7 +146,7 @@ public static class Program
 
     // ── record ──────────────────────────────────────────────────────────
 
-    private static async Task<int> RecordAsync(MeetingApp app, Options o)
+    private static async Task<int> RecordAsync(MeetingHost app, Options o)
     {
         var title = o.Str("title") ?? $"会议 {DateTimeOffset.Now:MM-dd HH:mm}";
         var seconds = o.Int("seconds", 0);
@@ -114,7 +197,7 @@ public static class Program
     // ── import ──────────────────────────────────────────────────────────
 
     /// <summary>导入已有录音（没有麦克风、或测试链路时用）。</summary>
-    private static async Task<int> ImportAsync(MeetingApp app, Options o)
+    private static async Task<int> ImportAsync(MeetingHost app, Options o)
     {
         var audioPath = o.Str("audio") ?? throw MeetingException.Invalid("缺少 --audio");
         if (!File.Exists(audioPath)) throw new MeetingException(MeetingErrorCodes.AudioNotFound, $"音频不存在：{audioPath}");
@@ -134,7 +217,7 @@ public static class Program
 
     // ── transcribe ──────────────────────────────────────────────────────
 
-    private static async Task<int> TranscribeAsync(MeetingApp app, Options o)
+    private static async Task<int> TranscribeAsync(MeetingHost app, Options o)
     {
         var meetingId = o.Str("meeting") ?? throw MeetingException.Invalid("缺少 --meeting");
         var meeting = app.Meetings.RequireMeeting(meetingId);
@@ -200,7 +283,7 @@ public static class Program
     // ── resume ──────────────────────────────────────────────────────────
 
     /// <summary>续转：从已落库的段数继续，不重跑已完成部分。</summary>
-    private static async Task<int> ResumeAsync(MeetingApp app, Options o)
+    private static async Task<int> ResumeAsync(MeetingHost app, Options o)
     {
         var runId = o.Str("run") ?? throw MeetingException.Invalid("缺少 --run <runId>");
         var run = app.Meetings.RequireRun(runId);
@@ -233,7 +316,7 @@ public static class Program
     }
 
     /// <summary>按引擎造 provider；whisper 走"带降档"的工厂（B4）。</summary>
-    private static IAsrProvider CreateProvider(MeetingApp app, Options o, string engineId)
+    private static IAsrProvider CreateProvider(MeetingHost app, Options o, string engineId)
     {
         var apiKey = o.Str("api-key") ?? Environment.GetEnvironmentVariable(AsrEngineCatalog.ApiKeyEnvVar);
 
@@ -260,7 +343,7 @@ public static class Program
 
     // ── 只读命令 ────────────────────────────────────────────────────────
 
-    private static int List(MeetingApp app, Options o)
+    private static int List(MeetingHost app, Options o)
     {
         var meetings = app.Meetings.ListMeetings(o.Int("limit", 20));
         if (meetings.Count == 0)
@@ -281,7 +364,7 @@ public static class Program
         return 0;
     }
 
-    private static int Show(MeetingApp app, Options o)
+    private static int Show(MeetingHost app, Options o)
     {
         var id = o.Str("meeting") ?? o.Positional.FirstOrDefault() ?? throw MeetingException.Invalid("缺少会议 id");
         var meeting = app.Meetings.RequireMeeting(id);
@@ -312,7 +395,7 @@ public static class Program
         return 0;
     }
 
-    private static int Models(MeetingApp app, Options o)
+    private static int Models(MeetingHost app, Options o)
     {
         var store = app.ModelCatalog.Store;
 
@@ -358,7 +441,7 @@ public static class Program
         return 0;
     }
 
-    private static int Doctor(MeetingApp app)
+    private static int Doctor(MeetingHost app)
     {
         Console.WriteLine($"数据目录 : {MeetingConstants.ResolveDataDir()}");
         Console.WriteLine($"数据库   : {app.Database.Path}");
@@ -411,7 +494,7 @@ public static class Program
         return 0;
     }
 
-    private static int Audit(MeetingApp app, Options o)
+    private static int Audit(MeetingHost app, Options o)
     {
         var meetingId = o.Str("meeting");
         var records = new MeetingAuditLog(app.Session).List(meetingId, o.Int("limit", 50));
@@ -436,7 +519,7 @@ public static class Program
     // ── serve ───────────────────────────────────────────────────────────
 
     /// <summary>起回环 HTTP：/mcp 给 DesktopAgent 用，/v1/health 给宿主探活。</summary>
-    private static async Task<int> ServeAsync(MeetingApp app, Options o)
+    private static async Task<int> ServeAsync(MeetingHost app, Options o)
     {
         var token = o.Str("token")
                     ?? Environment.GetEnvironmentVariable("SDEMO_APP_TOKEN")
@@ -513,40 +596,6 @@ public static class Program
         """);
 
     // ── 组合根 ──────────────────────────────────────────────────────────
-
-    private sealed class MeetingApp : IDisposable
-    {
-        private MeetingApp(MeetingDatabase db, MeetingSession session, MeetingService meetings, MeetingModelCatalog models)
-        {
-            Database = db;
-            Session = session;
-            Meetings = meetings;
-            ModelCatalog = models;
-        }
-
-        public MeetingDatabase Database { get; }
-        public MeetingSession Session { get; }
-        public MeetingService Meetings { get; }
-        public MeetingModelCatalog ModelCatalog { get; }
-
-        public static MeetingApp Open()
-        {
-            var dataDir = MeetingConstants.ResolveDataDir();
-            Directory.CreateDirectory(dataDir);
-
-            var db = MeetingDatabase.Open(Path.Combine(dataDir, MeetingConstants.DbFileName));
-            var session = new MeetingSession(db);
-            var meetings = new MeetingService(session);
-
-            // 上次崩溃留下的 Running 标成 Interrupted（可续转）
-            var recovered = meetings.RecoverInterruptedRuns();
-            if (recovered > 0) Console.Error.WriteLine($"[info] {recovered} 个未完成的转写 run 已标记为 interrupted");
-
-            return new MeetingApp(db, session, meetings, new MeetingModelCatalog());
-        }
-
-        public void Dispose() => Database.Dispose();
-    }
 
     // ── 参数 ────────────────────────────────────────────────────────────
 
