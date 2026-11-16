@@ -87,15 +87,22 @@ public sealed class MeetingService
         return run;
     }
 
-    /// <summary>转写成功：落段、关 run、切 current_run、会议转 Ready。</summary>
-    public TranscriptSlice CompleteRun(TranscriptRunRecord run, AsrResult result, IReadOnlyList<AsrSegment>? segments = null)
+    /// <summary>
+    /// 追加一段转写结果（增量持久化）。分段转写时每完成一段就落库，
+    /// 这样取消/崩溃后已转的部分不会丢——"保留已完成的部分"是硬要求。
+    /// </summary>
+    public IReadOnlyList<TranscriptSegmentRecord> AppendSegments(
+        TranscriptRunRecord run,
+        IReadOnlyList<AsrSegment> segments,
+        int startOrdinal)
     {
-        var source = segments ?? result.Segments;
-        var rows = source
+        if (segments.Count == 0) return Array.Empty<TranscriptSegmentRecord>();
+
+        var rows = segments
             .Select((s, i) => new TranscriptSegmentRecord(
                 MeetingIds.NewId(),
                 run.Id,
-                i,
+                startOrdinal + i,
                 s.StartMs,
                 s.EndMs,
                 s.Text,
@@ -108,6 +115,18 @@ public sealed class MeetingService
             .ToArray();
 
         _session.InsertSegments(run.Id, rows);
+        return rows;
+    }
+
+    /// <summary>转写成功：收尾 run、切 current_run、会议转 Ready。</summary>
+    public TranscriptSlice CompleteRun(TranscriptRunRecord run, AsrResult result, IReadOnlyList<AsrSegment>? segments = null)
+    {
+        var source = segments ?? result.Segments;
+        var existing = _session.ListSegments(run.Id).Count;
+
+        if (existing == 0 && source.Count > 0)
+            AppendSegments(run, source, 0);
+
         _session.UpdateRunStatus(run.Id, TranscriptRunStatus.Done, finishedAt: _clock.GetUtcNow());
         _session.SetCurrentRun(run.MeetingId, run.Id);
         _session.UpdateMeetingStatus(run.MeetingId, MeetingStatus.Ready, run.Id);
@@ -115,6 +134,43 @@ public sealed class MeetingService
         var finished = _session.GetRun(run.Id)!;
         return new TranscriptSlice(finished, _session.ListSegments(run.Id));
     }
+
+    /// <summary>质检结果回写到段上（S1–S4 的产物）。</summary>
+    public void ApplyWarnings(string runId, IReadOnlyList<AsrWarning> warnings)
+    {
+        if (warnings.Count == 0) return;
+
+        var segments = _session.ListSegments(runId);
+        if (segments.Count == 0) return;
+
+        var byOrdinal = new Dictionary<int, List<AsrWarningCode>>();
+        foreach (var warning in warnings)
+        {
+            var target = segments.FirstOrDefault(s => warning.AtMs >= s.StartMs && warning.AtMs <= s.EndMs)
+                         ?? segments[0];
+
+            if (!byOrdinal.TryGetValue(target.Ordinal, out var list))
+                byOrdinal[target.Ordinal] = list = new List<AsrWarningCode>();
+
+            if (!list.Contains(warning.Code)) list.Add(warning.Code);
+        }
+
+        _session.UpdateSegmentWarnings(runId,
+            byOrdinal.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<AsrWarningCode>)kv.Value));
+    }
+
+    /// <summary>续转：已完成多少段。</summary>
+    public int CountSegments(string runId) => _session.ListSegments(runId).Count;
+
+    /// <summary>把 run 重新标记为 Running（续转用）。</summary>
+    public void MarkRunning(TranscriptRunRecord run)
+    {
+        _session.UpdateRunStatus(run.Id, TranscriptRunStatus.Running);
+        _session.UpdateMeetingStatus(run.MeetingId, MeetingStatus.Transcribing);
+    }
+
+    public TranscriptRunRecord RequireRun(string runId) =>
+        _session.GetRun(runId) ?? throw new MeetingException(MeetingErrorCodes.RunNotFound, $"转写 run 不存在：{runId}");
 
     public void FailRun(TranscriptRunRecord run, string code, string message)
     {

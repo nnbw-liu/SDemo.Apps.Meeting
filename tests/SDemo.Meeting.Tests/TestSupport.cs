@@ -65,4 +65,42 @@ public static class TestAudio
 
         return path;
     }
+
+    /// <summary>按"静音 / 有声"交替写一段音频，用来测 VAD。</summary>
+    public static string WritePattern(string path, params (int Seconds, short Amplitude)[] parts)
+    {
+        const int sampleRate = 16000;
+        var totalSamples = parts.Sum(p => p.Seconds * sampleRate);
+        var dataBytes = totalSamples * 2;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        using var fs = File.Create(path);
+        using var w = new BinaryWriter(fs);
+
+        w.Write("RIFF"u8.ToArray());
+        w.Write((uint)(36 + dataBytes));
+        w.Write("WAVE"u8.ToArray());
+        w.Write("fmt "u8.ToArray());
+        w.Write(16u);
+        w.Write((ushort)1);
+        w.Write((ushort)1);
+        w.Write((uint)sampleRate);
+        w.Write((uint)(sampleRate * 2));
+        w.Write((ushort)2);
+        w.Write((ushort)16);
+        w.Write("data"u8.ToArray());
+        w.Write((uint)dataBytes);
+
+        foreach (var (seconds, amplitude) in parts)
+        {
+            for (var i = 0; i < seconds * sampleRate; i++)
+            {
+                w.Write(amplitude == 0
+                    ? (short)0
+                    : (short)(Math.Sin(2 * Math.PI * 440 * i / sampleRate) * amplitude));
+            }
+        }
+
+        return path;
+    }
 }

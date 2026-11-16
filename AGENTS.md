@@ -8,7 +8,8 @@
 
 ## 现状（2026-11-16）
 
-🚧 **阶段 A 已落地**：8 个工程 + `SDemo.Meeting.slnf`，`import → transcribe → list/show` 端到端跑通（whisper large-v3-turbo）。
+✅ **阶段 A 已落地**：8 个工程 + `SDemo.Meeting.slnf`，`import → transcribe → list/show` 端到端跑通。
+🟡 **阶段 B 完成 4/7**：VAD 分段（含窗口打包）、增量落库/取消/续转、hotwords、语言 hint + 质检告警。
 A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x80070005），需在有权限的机器上复验。
 
 | 层 | 状态 |
@@ -23,9 +24,9 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 
 ## 开工先做三件事
 
-1. ASR 运行时已定稿到 v0.4（[asr-runtime.md](docs/asr-runtime.md)）：whisper 主力、Qwen3-ASR 升级档，阶段 A 已完成；**下一步阶段 B（whisper 生产化：VAD、进度、模型分发、warmup 提示）**。
+1. ASR 运行时 v0.4（[asr-runtime.md](docs/asr-runtime.md)）：阶段 A 完成，阶段 B 的 B1/B2/B5/B6 已就位；**下一步 B3 模型分发（下载 + sha256 + 占用/清理）、B4 small 低配档自动回落、B7 结果页**。
 2. 建 WPF 组合根与 MCP server（当前 Host 是 CLI，界面和工具面还没接）。
-3. 在父仓 `workspaces/meeting.json` 把 `status` 改 `active`。
+3. `workspaces/meeting.json` 已是 `active`。
 
 ## 必读
 
@@ -72,6 +73,8 @@ dotnet test tests\SDemo.Meeting.Tests -c Release
 - **WASAPI 采集会挂死**：无麦克风权限 / 虚拟声卡会返回 `0x80070005`，老的 `waveInOpen` 甚至直接阻塞。`DualTrackRecorder` 用看门狗（启动 10 s、首包 5 s）保证快速失败，别退回同步调用。
 - **云端 ASR 的口径要以实测为准**：DeepSeek 的 `/v1/chat/completions` **不收音频**（`deepseek-flash` 的 `input_modalities` 只有 text/image，`input_audio` 会 422）；能用的是独立端点 `POST /v1/tools/asr`（multipart，≤8 MB / ≤120 秒，无时间戳）。
 - **Key 只走环境变量或命令行参数**（`SDEMO_ASR_API_KEY`），不落库、不进日志、不进仓；云端调用必须 `--allow-remote` 且每次打印"音频将上传"。产品化路径是 Agent 中继，不是 Meeting 直连。
+- **VAD 必须打包窗口**：能量 VAD 会在每个自然停顿处断开，81 秒音频切出 27 段 = 27 次模型调用。`VadSegmenter` 的 `MaxPackGapMs`（默认 4 秒）负责把短停顿并回一个窗口，别删。
+- **分段引擎按 `NeedsVad` 分流**：whisper 自带长音频能力（整段一次），chat-audio / deepseek-tools 必须切段。判断依据是能力声明，不是引擎名。
 - 测试工程是 `net10.0`，**不能引用 `net10.0-windows` 的 Audio 工程**；采集只能靠 CLI 人工验。
 
 ## 不要读

@@ -37,6 +37,7 @@ public static class Program
                 "record" => await RecordAsync(app, o),
                 "import" => await ImportAsync(app, o),
                 "transcribe" => await TranscribeAsync(app, o),
+                "resume" => await ResumeAsync(app, o),
                 "list" => List(app, o),
                 "show" => Show(app, o),
                 "models" => Models(app),
@@ -181,9 +182,11 @@ public static class Program
             if (p.Percent % 20 < 5) Console.WriteLine($"  … {p.Percent}%  {p.Stage}");
         });
 
+        var options = BuildOptions(o, language);
+
         var runner = new TranscriptionRunner(app.Meetings);
         var slice = await runner.RunAsync(
-            meeting.Id, audioPath, provider, language,
+            meeting.Id, audioPath, provider, options,
             progress: progress,
             ct: CancellationToken.None);
 
@@ -194,6 +197,60 @@ public static class Program
 
         return 0;
     }
+
+    // ── resume ──────────────────────────────────────────────────────────
+
+    /// <summary>续转：从已落库的段数继续，不重跑已完成部分。</summary>
+    private static async Task<int> ResumeAsync(MeetingApp app, Options o)
+    {
+        var runId = o.Str("run") ?? throw MeetingException.Invalid("缺少 --run <runId>");
+        var run = app.Meetings.RequireRun(runId);
+
+        if (run.Status is TranscriptRunStatus.Done or TranscriptRunStatus.Failed)
+            throw new MeetingException(MeetingErrorCodes.RunNotTerminal, $"run 已是终态（{run.Status}），不能续转");
+
+        var audioPath = o.Str("audio");
+        if (audioPath is null)
+        {
+            var asset = run.AudioAssetId is { } id ? app.Session.GetAudio(id) : null;
+            audioPath = asset?.Path
+                        ?? throw new MeetingException(MeetingErrorCodes.AudioNotFound, "找不到这次 run 的音频，请用 --audio 指定");
+        }
+
+        var engineId = o.Str("engine") ?? run.Engine;
+        using var provider = AsrEngineCatalog.Create(
+            engineId,
+            app.ModelCatalog,
+            o.Str("base-url"),
+            o.Str("model"),
+            o.Str("whisper-model"),
+            o.Str("api-key") ?? Environment.GetEnvironmentVariable(AsrEngineCatalog.ApiKeyEnvVar),
+            o.Flag("allow-remote"));
+
+        Console.WriteLine($"续转 run {runId}：已完成 {app.Meetings.CountSegments(runId)} 段");
+
+        var runner = new TranscriptionRunner(app.Meetings);
+        var slice = await runner.ResumeAsync(
+            runId, audioPath, provider,
+            BuildOptions(o, o.Str("lang", "zh")),
+            new Progress<AsrProgress>(p => Console.WriteLine($"  … {p.Percent}%  {p.Stage}")),
+            CancellationToken.None);
+
+        Console.WriteLine($"续转完成：{slice.Segments.Count} 段 · {slice.TotalChars} 字");
+        return 0;
+    }
+
+    private static TranscriptionOptions BuildOptions(Options o, string? language) =>
+        new(
+            Language: language,
+            Hotwords: ParseList(o.Str("hotwords")),
+            MaxSegmentMs: o.Int("max-segment", 60_000),
+            UseVad: !o.Flag("no-vad"));
+
+    private static IReadOnlyList<string>? ParseList(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? null
+            : raw.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     // ── 只读命令 ────────────────────────────────────────────────────────
 
@@ -240,7 +297,10 @@ public static class Program
         {
             Console.WriteLine();
             foreach (var seg in slice.Segments)
-                Console.WriteLine($"  [{seg.FormatTimecode()}] {seg.Text}");
+            {
+                var flag = seg.Warnings.Count == 0 ? "" : $"  ⚠ {string.Join(",", seg.Warnings)}";
+                Console.WriteLine($"  [{seg.FormatTimecode()}] {seg.Text}{flag}");
+            }
         }
 
         return 0;
@@ -299,15 +359,17 @@ public static class Program
     }
 
     private static void Help() => Console.WriteLine("""
-        meeting —— sdemo.meeting 阶段 A CLI（录 → 转 → 存）
+        meeting —— sdemo.meeting CLI（录 → 转 → 存）
 
         用法：
           meeting record      --title "周会" [--seconds 30] [--no-loopback] [--kind weekly]
           meeting import      --audio <wav> [--title "..."] [--transcribe]
           meeting transcribe  --meeting <id> [--engine whisper-cpp|chat-audio|deepseek-tools] [--lang zh] [--audio <wav>]
+                              分段：--hotwords "SDemo,Qwen3" --max-segment 60000 --no-vad
                               云端 chat ：--base-url https://... --model <id> --allow-remote [--api-key <key>]
                               云端 tools：--engine deepseek-tools --allow-remote [--api-key <key>]
-                                          （Key 也可放 SDEMO_ASR_API_KEY；≤120 秒 / ≤8 MB，需先切段）
+                                          （Key 也可放 SDEMO_ASR_API_KEY；≤120 秒 / ≤8 MB）
+          meeting resume      --run <runId> [--audio <wav>] [--lang zh] [--engine ...]
           meeting list        [--limit 20]
           meeting show        <id>
           meeting models

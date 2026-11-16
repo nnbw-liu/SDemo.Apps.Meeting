@@ -297,6 +297,31 @@ public sealed class MeetingSession
         return run is null ? null : new TranscriptSlice(run, ListSegments(runId));
     }
 
+    /// <summary>按 ordinal 批量回写质检告警（不新增行，只改 warnings 列）。</summary>
+    public void UpdateSegmentWarnings(string runId, IReadOnlyDictionary<int, IReadOnlyList<AsrWarningCode>> warnings)
+    {
+        if (warnings.Count == 0) return;
+
+        using var conn = _db.Connect();
+        using var tx = conn.BeginTransaction();
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE mtg_segment SET warnings = $warn WHERE run_id = $run AND ordinal = $ord;";
+        var warn = cmd.Parameters.Add("$warn", SqliteType.Text);
+        cmd.Parameters.AddWithValue("$run", runId);
+        var ord = cmd.Parameters.Add("$ord", SqliteType.Integer);
+
+        foreach (var (ordinal, codes) in warnings)
+        {
+            if (codes.Count == 0) continue;
+            warn.Value = string.Join(',', codes.Select(c => c.ToString()));
+            ord.Value = ordinal;
+            cmd.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+    }
+
     // ── 行映射 ──────────────────────────────────────────────────────────
 
     private static MeetingRecord ReadMeeting(SqliteDataReader r) => new(
