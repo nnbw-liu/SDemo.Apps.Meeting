@@ -297,6 +297,45 @@ public sealed class MeetingSession
         return run is null ? null : new TranscriptSlice(run, ListSegments(runId));
     }
 
+    /// <summary>标注说话人（v1 手工）。speaker 为空表示清除标注。</summary>
+    public int UpdateSegmentSpeaker(string runId, int ordinal, string? speaker, SpeakerSource source)
+    {
+        using var conn = _db.Connect();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE mtg_segment SET speaker = $speaker, speaker_source = $source
+             WHERE run_id = $run AND ordinal = $ord;
+            """;
+        cmd.Parameters.AddWithValue("$speaker", string.IsNullOrWhiteSpace(speaker) ? DBNull.Value : speaker.Trim());
+        cmd.Parameters.AddWithValue("$source", source.ToString());
+        cmd.Parameters.AddWithValue("$run", runId);
+        cmd.Parameters.AddWithValue("$ord", ordinal);
+        return cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>一批 run 各自有多少段（列表页用，避免 N+1 次查询）。</summary>
+    public IReadOnlyDictionary<string, int> CountSegmentsByRun(IReadOnlyCollection<string> runIds)
+    {
+        var result = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (runIds.Count == 0) return result;
+
+        using var conn = _db.Connect();
+        using var cmd = conn.CreateCommand();
+        var names = new List<string>(runIds.Count);
+        var i = 0;
+        foreach (var id in runIds)
+        {
+            var name = "$r" + i++;
+            names.Add(name);
+            cmd.Parameters.AddWithValue(name, id);
+        }
+
+        cmd.CommandText = $"SELECT run_id, COUNT(*) FROM mtg_segment WHERE run_id IN ({string.Join(",", names)}) GROUP BY run_id;";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) result[reader.GetString(0)] = reader.GetInt32(1);
+        return result;
+    }
+
     /// <summary>按 ordinal 批量回写质检告警（不新增行，只改 warnings 列）。</summary>
     public void UpdateSegmentWarnings(string runId, IReadOnlyDictionary<int, IReadOnlyList<AsrWarningCode>> warnings)
     {

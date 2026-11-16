@@ -1,0 +1,231 @@
+@inject MeetingQuery Query
+@inject TranscriptEditor Editor
+
+<div class="mtg-app">
+    <aside class="mtg-side">
+        <div class="mtg-side-head">
+            <span class="eyebrow">sdemo.meeting</span>
+            <h1>会议</h1>
+        </div>
+
+        @if (_items.Count == 0)
+        {
+            <p class="mtg-empty">还没有会议。用 <code>meeting record</code> 或 <code>meeting import</code> 建一场。</p>
+        }
+        else
+        {
+            <ul class="mtg-list">
+                @foreach (var item in _items)
+                {
+                    <li class="@(item.Meeting.Id == _selectedId ? "is-active" : "")"
+                        @onclick="() => SelectAsync(item.Meeting.Id)">
+                        <div class="mtg-item-title">@item.Meeting.Title</div>
+                        <div class="mtg-item-meta">
+                            <span>@item.Meeting.StartAt.ToLocalTime().ToString("MM-dd HH:mm")</span>
+                            <span class="dot"></span>
+                            <span>@(item.SegmentCount == 0 ? "未转写" : $"{item.SegmentCount} 段")</span>
+                        </div>
+                        <div class="mtg-item-meta">
+                            <span class="pill pill-@item.Meeting.Status.ToString().ToLowerInvariant()">@item.Meeting.Status</span>
+                            @if (item.RunStatus is { } status)
+                            {
+                                <span class="pill">@item.Engine · @status</span>
+                            }
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </aside>
+
+    <section class="mtg-main">
+        @if (_detail is null)
+        {
+            <div class="mtg-placeholder">左侧选一场会议看转写结果</div>
+        }
+        else
+        {
+            <header class="mtg-head">
+                <div>
+                    <h2>@_detail.Meeting.Title</h2>
+                    <div class="mtg-head-meta">
+                        <span>@_detail.Meeting.StartAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</span>
+                        <span class="dot"></span>
+                        <span>@_detail.Audio.Count 条音轨</span>
+                        <span class="dot"></span>
+                        <span>@(_detail.Current?.Segments.Count ?? 0) 段 · @(_detail.Current?.TotalChars ?? 0) 字</span>
+                    </div>
+                </div>
+                <div class="mtg-head-actions">
+                    <span class="pill pill-@_detail.Meeting.Status.ToString().ToLowerInvariant()">@_detail.Meeting.Status</span>
+                    @if (_detail.Current is { } slice)
+                    {
+                        <span class="pill">@slice.Run.Engine</span>
+                    }
+                </div>
+            </header>
+
+            @if (_flash is { Length: > 0 })
+            {
+                <div class="mtg-flash">@_flash</div>
+            }
+
+            @if (_detail.Current is null)
+            {
+                <div class="mtg-placeholder">这场会议还没有转写结果</div>
+            }
+            else
+            {
+                <div class="mtg-toolbar">
+                    <input class="mtg-input" placeholder="筛选段落文本" @bind="_filter" @bind:event="oninput" />
+                    <span class="mtg-hint">点时间码定位 · 右侧填说话人即标注</span>
+                </div>
+
+                <ol class="mtg-segments">
+                    @foreach (var seg in Filtered(_detail.Current))
+                    {
+                        var active = seg.Ordinal == _activeOrdinal;
+                        <li class="seg @(active ? "is-active" : "")" @key="seg.Ordinal">
+                            <button class="seg-time" @onclick="() => Activate(seg.Ordinal)"
+                                    title="定位到这一段（录音播放待接播放器）">
+                                @Timecode(seg.StartMs)
+                            </button>
+
+                            <div class="seg-body">
+                                <p class="seg-text">@seg.Text</p>
+                                <div class="seg-meta">
+                                    @if (seg.Warnings.Count > 0)
+                                    {
+                                        <span class="warn">⚠ @string.Join(" · ", seg.Warnings)</span>
+                                    }
+                                    @if (seg.Language is { Length: > 0 })
+                                    {
+                                        <span class="muted">@seg.Language</span>
+                                    }
+                                    <span class="speaker">
+                                        @if (string.IsNullOrWhiteSpace(seg.Speaker))
+                                        {
+                                            <span class="muted">未标注说话人</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="spk">@seg.Speaker</span>
+                                            <span class="muted">@(seg.SpeakerSource == SpeakerSource.Manual ? "手工" : "自动")</span>
+                                        }
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="seg-actions">
+                                <input class="mtg-input mtg-input-sm" list="speakers" placeholder="说话人"
+                                       value="@seg.Speaker"
+                                       @onchange="e => TagAsync(seg.Ordinal, e.Value?.ToString())" />
+                                <button class="btn-ghost" @onclick="() => TagFromHereAsync(seg.Ordinal)">
+                                    从此段起
+                                </button>
+                            </div>
+                        </li>
+                    }
+                </ol>
+
+                <datalist id="speakers">
+                    @foreach (var name in _speakers)
+                    {
+                        <option value="@name"></option>
+                    }
+                </datalist>
+            }
+        }
+    </section>
+</div>
+
+@code {
+    private IReadOnlyList<MeetingListItem> _items = Array.Empty<MeetingListItem>();
+    private IReadOnlyList<string> _speakers = Array.Empty<string>();
+    private MeetingDetail? _detail;
+    private string? _selectedId;
+    private string _filter = string.Empty;
+    private int? _activeOrdinal;
+    private string? _flash;
+
+    protected override void OnInitialized()
+    {
+        _items = Query.List();
+        _speakers = Query.KnownSpeakers();
+        if (_items.Count > 0) Select(_items[0].Meeting.Id);
+    }
+
+    private void Select(string meetingId)
+    {
+        _selectedId = meetingId;
+        _detail = Query.GetDetail(meetingId);
+        _activeOrdinal = null;
+        _filter = string.Empty;
+        _flash = null;
+    }
+
+    private Task SelectAsync(string meetingId)
+    {
+        Select(meetingId);
+        return Task.CompletedTask;
+    }
+
+    private void Activate(int ordinal)
+    {
+        _activeOrdinal = ordinal;
+        _flash = $"已定位到 {Timecode(_detail?.Current?.Segments.FirstOrDefault(s => s.Ordinal == ordinal)?.StartMs ?? 0)}" +
+                 "（音频播放器待接，先把位置记下来）";
+    }
+
+    private Task TagAsync(int ordinal, string? speaker)
+    {
+        if (_detail?.Current is not { } slice) return Task.CompletedTask;
+
+        try
+        {
+            var updated = Editor.SetSpeaker(slice.Run.Id, ordinal, speaker);
+            _flash = string.IsNullOrWhiteSpace(updated.Speaker)
+                ? $"第 {ordinal} 段已清除说话人"
+                : $"第 {ordinal} 段标注为「{updated.Speaker}」";
+        }
+        catch (MeetingException ex)
+        {
+            _flash = $"标注失败：{ex.Message}";
+            return Task.CompletedTask;
+        }
+
+        Reload();
+        return Task.CompletedTask;
+    }
+
+    private Task TagFromHereAsync(int ordinal)
+    {
+        if (_detail?.Current is not { } slice) return Task.CompletedTask;
+
+        var name = slice.Segments.FirstOrDefault(s => s.Ordinal == ordinal)?.Speaker;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            _flash = "先在右侧填一个说话人，再点「从此段起」";
+            return Task.CompletedTask;
+        }
+
+        var affected = Editor.SetSpeakerFrom(slice.Run.Id, ordinal, name);
+        _flash = $"从第 {ordinal} 段起 {affected} 段标注为「{name}」";
+        Reload();
+        return Task.CompletedTask;
+    }
+
+    private void Reload()
+    {
+        _items = Query.List();
+        _speakers = Query.KnownSpeakers();
+        if (_selectedId is { } id) _detail = Query.GetDetail(id);
+    }
+
+    private IEnumerable<TranscriptSegmentRecord> Filtered(TranscriptSlice slice) =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? slice.Segments
+            : slice.Segments.Where(s => s.Text.Contains(_filter, StringComparison.Ordinal));
+
+    private static string Timecode(int ms) => TimeSpan.FromMilliseconds(ms).ToString(@"hh\:mm\:ss");
+}

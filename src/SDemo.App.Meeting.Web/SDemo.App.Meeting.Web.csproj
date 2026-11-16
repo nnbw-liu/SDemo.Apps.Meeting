@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <!-- 结果页 UI（RCL）：只做展示与标注，不碰数据库。被 Viewer 的 BlazorWebView 加载。 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SDemo.App.Meeting.Web</RootNamespace>
+    <AssemblyName>SDemo.App.Meeting.Web</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SDemo.App.Meeting.Contracts\SDemo.App.Meeting.Contracts.csproj" />
+    <ProjectReference Include="..\SDemo.App.Meeting.Core\SDemo.App.Meeting.Core.csproj" />
+  </ItemGroup>
+
+</Project>

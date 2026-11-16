@@ -447,7 +447,7 @@ public sealed record AsrResult(
 | B4 | 低配档 `small` + 自动回落 | ✅ **2026-11-16 完成**：`AsrTierSelector` 事前按可用内存选档（模型体积 + 512 MB 余量），`FallbackAsrProvider` 事中捕获 OOM 再降一次；降档说明以 `EngineFallback` 告警落到段上、`show` 里可见 |
 | B5 | 术语表（hotwords / initial_prompt） | ✅ 已接：CLI `--hotwords "SDemo,Qwen3"` → whisper `WithPrompt`，参数落 `params_json` |
 | B6 | 语言 hint + 质检信号 S1–S4 | ✅ 已接：`--lang` 固定语言；`TranscriptQuality` 产出 warnings 并按时间回写到 `mtg_segment.warnings`；`show` 里以 ⚠ 显示 |
-| B7 | 转写结果页（段落 + 时间码 + 跳转 + 说话人） | ⬜ 未做（需要 WPF 界面，CLI 只能 `show` 打印） |
+| B7 | 转写结果页（段落 + 时间码 + 跳转 + 说话人） | ✅ **2026-11-16 完成**：`Web` RCL（`MeetingResult.razor`）+ `Viewer`（WPF + BlazorWebView，进程内组件、不起 HTTP）；左列会议、右列段落：时间码按钮定位、行内标说话人、"从此段起"批量标注、告警 ⚠ 与筛选 |
 
 **B1 的关键修正（实测踩出来的）**：VAD 在自然停顿处会把音频切成"一句话一段"——81 秒音频切出 **27 段**，等于 27 次模型调用、27 次音频编码，慢且丢上下文。所以加了一层**窗口打包**：相邻语音段若停顿 ≤4 秒且总长 ≤60 秒就并回一个窗口。加完同一段音频变成 **2 个窗口**，总耗时 19.4 秒（RTF 0.24）。
 
@@ -461,7 +461,21 @@ public sealed record AsrResult(
 
 `models.json` 与运行期 manifest 同格式，所以安装包解到数据目录后**直接就是"已就绪"**。实测：真实 874 MB 模型的 sha256 `317eb69c…` 与内置常量一致，`--verify` 3.6 秒算完。
 
-**里程碑 B**：一场真实会议能全自动跑完，失败可恢复，混说处有提示。—— B1/B2/B3/B4/B5/B6 已就位；B7（结果页）未做。
+**里程碑 B**：一场真实会议能全自动跑完，失败可恢复，混说处有提示。—— **B1–B7 全部就位**。
+
+**B7 的落地形态**
+
+```
+SDemo.App.Meeting.Web    Razor 组件（MeetingResult.razor）：只做展示 + 标注，不碰 SQL
+SDemo.App.Meeting.Viewer WPF + BlazorWebView：组件在进程内跑，DI 直给存储/服务，不起 HTTP
+```
+
+结果页能做的：左列选会议（状态/段数/引擎），右列看段落（时间码、语言、⚠ 告警），
+点时间码定位段落（录音播放待接播放器），行内填说话人即标注，"从此段起"批量标注。
+
+⚠️ 与 Planner 的区别：Planner 用 Blazor Server + 本地 HTTP + cookie；Meeting 这里用
+**Blazor Hybrid**（`RootComponents`），把 HTTP 那一层省掉了——进程内组件直接调服务，
+少一个端口、少一套鉴权。代价是不能用 `@rendermode`、也不能靠 URL 路由。
 
 **B4 的两道闸**
 

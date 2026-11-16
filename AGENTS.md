@@ -9,7 +9,7 @@
 ## 现状（2026-11-16）
 
 ✅ **阶段 A 已落地**：8 个工程 + `SDemo.Meeting.slnf`，`import → transcribe → list/show` 端到端跑通。
-🟢 **阶段 B 完成 6/7**：VAD 分段（含窗口打包）、增量落库/取消/续转、模型库（打包 + 导入 + 校验 + 清理）、低配档自动回落、hotwords、语言 hint + 质检告警。只剩 B7（结果页，需要 WPF）。
+✅ **阶段 B 全部完成（B1–B7）**：VAD 分段（含窗口打包）、增量落库/取消/续转、模型库（打包 + 导入 + 校验 + 清理）、低配档自动回落、hotwords、语言 hint + 质检告警、转写结果页（WPF + BlazorWebView）。
 A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x80070005），需在有权限的机器上复验。
 
 | 层 | 状态 |
@@ -20,12 +20,14 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 | `Asr` | `WhisperCppProvider`（Whisper.net 1.8.1）、`ChatAudioProvider`（回环/云端 chat）、`DeepSeekToolsProvider`（`/v1/tools/asr`）、模型目录 |
 | `Audio` | `DualTrackRecorder`（WASAPI 麦克风 + 环回，带启动超时看门狗）、`WavDownmixer` |
 | `Mcp` | 4 个只读工具目录（server 待后续阶段） |
-| `Host` | CLI：`record` / `import` / `transcribe` / `list` / `show` / `models` / `doctor` / `tools` |
+| `Web` | 结果页 Razor 组件 `MeetingResult.razor`（列表 / 段落 / 时间码 / 说话人标注） |
+| `Viewer` | WPF + BlazorWebView 外壳（进程内组件，不起 HTTP）；`SDemo.Meeting.Viewer.exe` |
+| `Host` | CLI：`record` / `import` / `transcribe` / `resume` / `list` / `show` / `models` / `doctor` / `tools` |
 
 ## 开工先做三件事
 
-1. ASR 运行时 v0.4（[asr-runtime.md](docs/asr-runtime.md)）：阶段 A 完成；阶段 B 的 B1/B2/B3/B4/B5/B6 已就位；**只剩 B7 结果页（要开 WPF 组合根）**。
-2. 建 WPF 组合根与 MCP server（当前 Host 是 CLI，界面和工具面还没接）。
+1. **阶段 A / B 都完成了**（[asr-runtime.md](docs/asr-runtime.md)）。下一步：MCP server（工具目录已就位，JSON-RPC 还没接）、议题/决议/候选三类表（`mtg_topic` / `mtg_decision` / `mtg_action`）、会议分析交给 Agent 的批处理链路。
+2. Host 仍是 CLI；结果页是独立的 `SDemo.Meeting.Viewer.exe`（WPF + BlazorWebView）。
 3. `workspaces/meeting.json` 已是 `active`。
 
 模型侧：默认档由安装包自带（`tools/pack-models.ps1`），用户在 `meeting models` 里能看到状态、导入自己的模型、校验与清理。
@@ -55,6 +57,9 @@ src\SDemo.App.Meeting.Host\bin\Release\net10.0-windows10.0.19041.0\SDemo.Meeting
 $env:SDEMO_WHISPER_MODEL = "D:\models\ggml-large-v3-turbo-q8_0.bin"
 $env:SDEMO_WHISPER_SAMPLE = "D:\samples\zh-60s.wav"
 dotnet test tests\SDemo.Meeting.Tests -c Release
+
+# 转写结果页（WPF + BlazorWebView）
+src\SDemo.App.Meeting.Viewer\bin\Release\net10.0-windows10.0.19041.0\SDemo.Meeting.Viewer.exe --data-dir=<数据根>
 ```
 
 ## 铁律
