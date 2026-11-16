@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 转写引擎实现：whisper.cpp（Whisper.net 绑定）与 chat-audio（升级档）。
+         只依赖契约，不依赖 Core/Storage——引擎不知道数据库存在。 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SDemo.App.Meeting.Asr</RootNamespace>
+    <AssemblyName>SDemo.App.Meeting.Asr</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Whisper.net" Version="1.8.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.8.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SDemo.App.Meeting.Contracts\SDemo.App.Meeting.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

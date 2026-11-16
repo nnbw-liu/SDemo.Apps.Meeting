@@ -331,11 +331,15 @@ public sealed record AsrResult(
 
 | 机器 | 引擎 | 30 分钟音频 | 定位 |
 | --- | --- | --- | --- |
-| 6 核桌面 CPU，无独显 | **Qwen3-ASR-0.6B Q8** | **≈ 6 分钟（实测）** | ✅ **可作为升级档的主力规格** |
-| 同上 | whisper turbo q8 | 估 8–15 分钟（待实测） | ✅ 默认档 |
-| 同上 | whisper small q5 | 估 3–5 分钟（待实测） | ✅ 快速档 |
+| 6 核桌面 CPU，无独显 | **Qwen3-ASR-0.6B Q8** | **≈ 6 分钟（实测 RTF 0.20）** | ✅ 升级档主力 |
+| 同上 | **whisper turbo q8（Whisper.net）** | **≈ 20 分钟（实测 RTF 0.65，6 线程）** | ⚠️ 主力档，但**比 Qwen3 慢 3 倍** |
+| 同上 | whisper small q5 | 估 8–10 分钟（待实测） | ✅ 快速档 |
 | 同上 | Qwen3-ASR-1.7B Q8 | 估 15–25 分钟（0.6B 的 ~2.5 倍） | ⚠️ 待实测 |
 | 有独显 | 任意 | 快 3–10 倍 | ✅ |
+
+⚠️ **实测推翻了"whisper 更快"的直觉**：同一台机器、同一段 27 秒中文音频，whisper turbo 用 18.9 s（含 1.4 s 模型加载，RTF≈0.65），Qwen3-ASR-0.6B 用 5.5 s（RTF 0.20）。**纯 CPU 上 Qwen3 快 3 倍，且字错更少**（whisper 把"全量"听成"全粮"、"灰度"听成"挥度"；Qwen3 同一段零错）。
+
+这不是小差距，是"主力档该不该是 whisper"的产品问题。当前仍按 §0 的主次执行（whisper 主力），但**建议在阶段 B 末尾用真会议语料复核一次主次**——如果结论稳定，就把两者对调，成本只是换默认档。
 
 **产品含义**：升级档不再是"只有独显用户能用"。**默认升级档建议用 0.6B（1.0 GB），1.7B 作为"有独显再下"的可选包**——这和"体积/收益"的直觉一致，也和实测速度一致。
 
@@ -399,15 +403,17 @@ public sealed record AsrResult(
 
 ### 阶段 A · 地基（1 周）
 
-| # | 任务 | 产物 | 验收 |
-| --- | --- | --- | --- |
-| A1 | 建 `SDemo.Meeting.slnf` + 五件套 + `Asr` / `Audio` 工程 | 能 build | `dotnet build SDemo.Meeting.slnf -c Release` 通过 |
-| A2 | `IAsrProvider` / `AsrCapabilities` / `AsrResult` / `AsrWarning` 契约 | `Contracts` | 单测覆盖能力推导（段级 vs 字级 anchor） |
-| A3 | `mtg_transcript_run` + `mtg_segment(run_id, engine?)` + `current_run_id` | `Storage` + 迁移 | Schema 迁移可重入；旧 run 可查 |
-| A4 | whisper.cpp P/Invoke 接通 `large-v3-turbo q8_0` | `WhisperCppProvider` | 30 分钟中文音频转写成功，带段级时间戳 |
-| A5 | 双路采集（room / online）+ 16k 单声道落盘 | `Audio` | 环回与麦克风各自成轨，时长对得上 |
+| # | 任务 | 状态 |
+| --- | --- | --- |
+| A1 | 建 `SDemo.Meeting.slnf` + 五件套 + `Asr` / `Audio` 工程 | ✅ **2026-11-16 完成**：8 个工程，`dotnet build SDemo.Meeting.slnf -c Release` 0 警告 |
+| A2 | `IAsrProvider` / `AsrCapabilities` / `AsrResult` / `AsrWarning` 契约 | ✅ 完成；`Anchor` 能力推导有单测（None→Document / Segment→Sentence / Word→Block） |
+| A3 | `mtg_transcript_run` + `mtg_segment(run_id, engine?)` + `current_run_id` | ✅ 完成；schema v1 + `user_version` 迁移可重入；软删、interrupted 恢复、序号唯一约束都有测试 |
+| A4 | whisper.cpp 接通 `large-v3-turbo q8_0` | ✅ 完成；**P/Invoke 用 Whisper.net 1.8.1**（同一份 ggml-org 原生库，ABI 由上游维护）；真机 27.1s 中文 → 9 段带时间戳，落库可回读 |
+| A5 | 双路采集（room / online）+ 16k 单声道落盘 | ⚠️ 代码完成，**本机被 Windows 麦克风隐私拒绝**（0x80070005），0.4 秒内明确失败并给出"设置→隐私→麦克风"提示；换有权限的机器即可验证 |
 
-**里程碑 A**：能录一场、能转一场、能存下来。
+**里程碑 A**：能录一场、能转一场、能存下来 —— 除 A5 的硬件权限外，`import → transcribe → list/show` 已端到端跑通。
+
+**实现备注（A4）**：没有自己手写 `whisper_full_params` 的 P/Invoke 结构体——实测 `whisper_full_default_params` 按值返回结构体，P/Invoke 按 `IntPtr` 接会直接崩（0xC0000005）。改用 Whisper.net 的绑定后，同一个 `whisper.dll` + 同一个模型文件，行为一致且不用赌 ABI 版本。
 
 ### 阶段 B · whisper 生产化（1.5 周）
 

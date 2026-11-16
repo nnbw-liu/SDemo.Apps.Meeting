@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 组合根：CLI + 运行期文件。WPF 界面是后续阶段，本阶段先保证「录-转-存」闭环。 -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>SDemo.App.Meeting.Host</RootNamespace>
+    <AssemblyName>SDemo.Meeting</AssemblyName>
+    <Product>会议</Product>
+    <AssemblyTitle>会议</AssemblyTitle>
+    <Description>会议 · 录音、转写、议题与决议</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SDemo.App.Meeting.Contracts\SDemo.App.Meeting.Contracts.csproj" />
+    <ProjectReference Include="..\SDemo.App.Meeting.Storage\SDemo.App.Meeting.Storage.csproj" />
+    <ProjectReference Include="..\SDemo.App.Meeting.Core\SDemo.App.Meeting.Core.csproj" />
+    <ProjectReference Include="..\SDemo.App.Meeting.Asr\SDemo.App.Meeting.Asr.csproj" />
+    <ProjectReference Include="..\SDemo.App.Meeting.Audio\SDemo.App.Meeting.Audio.csproj" />
+    <ProjectReference Include="..\SDemo.App.Meeting.Mcp\SDemo.App.Meeting.Mcp.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,15 @@
+{
+  "solution": {
+    "path": "SDemo.Meeting.sln",
+    "projects": [
+      "src\\SDemo.App.Meeting.Contracts\\SDemo.App.Meeting.Contracts.csproj",
+      "src\\SDemo.App.Meeting.Storage\\SDemo.App.Meeting.Storage.csproj",
+      "src\\SDemo.App.Meeting.Core\\SDemo.App.Meeting.Core.csproj",
+      "src\\SDemo.App.Meeting.Asr\\SDemo.App.Meeting.Asr.csproj",
+      "src\\SDemo.App.Meeting.Audio\\SDemo.App.Meeting.Audio.csproj",
+      "src\\SDemo.App.Meeting.Mcp\\SDemo.App.Meeting.Mcp.csproj",
+      "src\\SDemo.App.Meeting.Host\\SDemo.App.Meeting.Host.csproj",
+      "tests\\SDemo.Meeting.Tests\\SDemo.Meeting.Tests.csproj"
+    ]
+  }
+}

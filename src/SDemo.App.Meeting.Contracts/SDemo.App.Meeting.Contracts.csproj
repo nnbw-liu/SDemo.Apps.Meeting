@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 契约层：枚举 / DTO / ASR 接口 / 错误码 / JSON 约定。纯声明，不含存储与逻辑。 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SDemo.App.Meeting.Contracts</RootNamespace>
+    <AssemblyName>SDemo.App.Meeting.Contracts</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

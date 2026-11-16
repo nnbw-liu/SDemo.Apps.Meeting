@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 纯核心测试：schema / 会话 / 状态机 / 引擎契约。不含 WPF 与采集（那些靠 CLI 人工验）。 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>SDemo.Meeting.Tests</RootNamespace>
+    <AssemblyName>SDemo.Meeting.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SDemo.App.Meeting.Contracts\SDemo.App.Meeting.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\SDemo.App.Meeting.Storage\SDemo.App.Meeting.Storage.csproj" />
+    <ProjectReference Include="..\..\src\SDemo.App.Meeting.Core\SDemo.App.Meeting.Core.csproj" />
+    <ProjectReference Include="..\..\src\SDemo.App.Meeting.Asr\SDemo.App.Meeting.Asr.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

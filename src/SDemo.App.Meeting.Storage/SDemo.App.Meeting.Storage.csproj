@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 持久化：SQLite。只做「表 / SQL / 迁移 / 事务」，不含领域规则。 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SDemo.App.Meeting.Storage</RootNamespace>
+    <AssemblyName>SDemo.App.Meeting.Storage</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SDemo.App.Meeting.Contracts\SDemo.App.Meeting.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

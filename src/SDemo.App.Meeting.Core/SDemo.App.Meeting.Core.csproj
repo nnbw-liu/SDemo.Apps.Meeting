@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 领域服务：会议状态机、转写 run 生命周期、质检信号。 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SDemo.App.Meeting.Core</RootNamespace>
+    <AssemblyName>SDemo.App.Meeting.Core</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SDemo.App.Meeting.Contracts\SDemo.App.Meeting.Contracts.csproj" />
+    <ProjectReference Include="..\SDemo.App.Meeting.Storage\SDemo.App.Meeting.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

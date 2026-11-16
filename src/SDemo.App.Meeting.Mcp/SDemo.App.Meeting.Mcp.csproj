@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- MCP 工具面：工具目录 + 入参解析。v1 只读工具（list/get/transcript），写操作留给后续阶段。 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SDemo.App.Meeting.Mcp</RootNamespace>
+    <AssemblyName>SDemo.App.Meeting.Mcp</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SDemo.App.Meeting.Contracts\SDemo.App.Meeting.Contracts.csproj" />
+    <ProjectReference Include="..\SDemo.App.Meeting.Core\SDemo.App.Meeting.Core.csproj" />
+  </ItemGroup>
+
+</Project>
