@@ -133,6 +133,7 @@ public static class Program
                 "doctor" => Doctor(app),
                 "tools" => Tools(),
                 "audit" => Audit(app, o),
+                "archive" => await ArchiveAsync(app, o),
                 "serve" => await ServeAsync(app, o),
                 _ => Unknown(cmd),
             };
@@ -521,6 +522,32 @@ public static class Program
         return 0;
     }
 
+    // ── archive（投影到 KB，脚本/联调用）────────────────────────────────
+
+    private static async Task<int> ArchiveAsync(MeetingHost app, Options o)
+    {
+        var meetingId = o.Str("meeting") ?? throw MeetingException.Invalid("缺少 --meeting");
+        var includeTranscript = !o.Flag("summary-only");
+
+        if (KbConnection.TryRead() is null)
+        {
+            Console.Error.WriteLine($"[{MeetingErrorCodes.KbUnavailable}] 找不到 KB（缺 sdemo.kb.json 或 token），先启动 sdemo.kb");
+            return 3;
+        }
+
+        var projected = await app.Projection.ProjectAsync(meetingId, includeTranscript);
+        Console.WriteLine($"投影：{projected.Status}  blocks={projected.BlockCount}  attempts={projected.Attempts}");
+
+        if (projected.Status != ProjectionStatus.Done)
+        {
+            Console.Error.WriteLine($"[failed] {projected.LastError}");
+            return 3;
+        }
+
+        Console.WriteLine($"  docId  ：{projected.DocId}  v{projected.DocVersion}（retention=durable）");
+        return 0;
+    }
+
     // ── serve ───────────────────────────────────────────────────────────
 
     /// <summary>起回环 HTTP：/mcp 给 DesktopAgent 用，/v1/health 给宿主探活。</summary>
@@ -589,6 +616,7 @@ public static class Program
           meeting show        <id>
           meeting models      [--import <文件> [--id <packId>] [--overwrite]] [--verify <id>] [--remove <id>]
           meeting audit       [--meeting <id>] [--limit 50]
+          meeting archive     --meeting <id> [--summary-only]
           meeting serve       [--port 0] [--token <hex>] [--show-token] [--no-runtime-file]
           meeting doctor
           meeting tools

@@ -126,7 +126,7 @@ internal sealed class MeetingHost : IDisposable
             if (pending.Attempts >= maxAttempts) continue;
             try
             {
-                await Projection.ProjectAsync(pending.MeetingId, pending.IncludeTranscript, ct).ConfigureAwait(false);
+                await Projection.ProjectAsync(pending.MeetingId, pending.IncludeTranscript, ct: ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

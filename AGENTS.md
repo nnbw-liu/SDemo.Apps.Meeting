@@ -14,7 +14,7 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 ✍️ **MCP 写面已开**：6 个写工具走 `MeetingDomainService`，成功与失败都落 `mtg_audit`（参数只存 300 字摘要）；`meeting audit` 可查。
 🏷️ **领域模型已建**：`mtg_topic` / `mtg_decision` / `mtg_action`（schema v3，老库就地迁移）；候选转 `intaken` 必须带 `plannerRef`。
 🧠 **P4 Meeting 侧完成**：分析队列（`mtg_analysis`）+ `meeting_request/claim/finish/status` 四个工具；**Meeting 不调模型**，map-reduce 由 DesktopAgent claim 后做。界面有「分析」按钮与状态轮询。
-📚 **P3 写入链路完成**：会议 → KB 的 `ingest` + `promote`（归档 = 同一 doc 升 durable）、内容哈希幂等键、KB 不在时只记失败并在启动补投。**KB 本机未安装**，真实 ingest 未联调。
+📚 **P3 完成（含真实联调）**：会议 → KB 的 `ingest`（归档直接 durable，含转写）、内容哈希幂等键、KB 不在时只记失败并在启动补投。已装 sdemo.kb 实测：文档进库、16 块、`ownerApp=sdemo.meeting`。**发现 `promote` 只给 KB 界面/Agent**（应用调 403），故归档一次写成 durable。
 🗂️ **P2 主体完成**：三栏 + 右栏检视（议题增删、确认决议、候选拒绝、最近改动），段落可「标为决议/标为候选」并带时间码 anchor；UI 写操作也落审计（actor=User）。
 🎙️ **P1 主体完成**：录音卡（开始/计时/停止并转写/取消/进度）+ 双轨开关；状态机在 `Core.RecordingCoordinator`，采集与引擎注入，无麦克风也能测。本机仍被 Windows 麦克风权限拒绝（0x80070005），真机录音待放开。
 🖥️ **主程序 P0 完成**：`SDemo.Meeting.exe` = WPF 外壳 + BlazorWebView + 进程内 MCP（不再有独立 Viewer）；关窗即停服务、runtime 文件转 `stopped`；日志在 `<数据根>\meeting.log`。
@@ -29,7 +29,7 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 | `Audio` | `DualTrackRecorder`（WASAPI 麦克风 + 环回，带启动超时看门狗）、`WavDownmixer` |
 | `Mcp` | `MeetingMcpServer`（JSON-RPC：initialize / ping / tools/list / tools/call）+ 8 个只读 + 9 个写工具（议题/决议/候选的增改确认 + 分析队列的 request/claim/finish），写工具 risk=medium、approval=once、每次调用落 `mtg_audit` |
 | `Web` | `MainShell.razor`（错误边界）、`MeetingResult.razor`（三栏）、`DomainPanel.razor`（议题/决议/候选/审计）、`RecordPanel.razor`（录音卡） |
-| `Host` | **主程序**：WPF 外壳 + BlazorWebView + 进程内 MCP（`SDemo.Meeting.exe`）；带参时是 CLI：`record` / `import` / `transcribe` / `resume` / `list` / `show` / `models` / `audit` / `doctor` / `tools` / `serve` |
+| `Host` | **主程序**：WPF 外壳 + BlazorWebView + 进程内 MCP（`SDemo.Meeting.exe`）；带参时是 CLI：`record` / `import` / `transcribe` / `resume` / `list` / `show` / `models` / `audit` / `archive` / `doctor` / `tools` / `serve` |
 
 ## 开工先做三件事
 
@@ -98,6 +98,8 @@ src\SDemo.App.Meeting.Host\bin\Release\net10.0-windows10.0.19041.0\SDemo.Meeting
 - **写工具必须落审计**：`MeetingMcpServer` 只在 `MeetingToolCatalog.WriteToolNames` 命中时审计；新增写工具记得把 `ReadOnly: false`（名单自动派生，别手写第二份）。
 - **审计只存 300 字摘要**：正文不进 `mtg_audit`，否则审计表会变成第二份业务数据。
 - **分析链路分两半**：Meeting 只排队（零凭证，不调模型），DesktopAgent claim 后做 map-reduce，最后用写工具落库再 `meeting_finish_analysis`。别把模型调用塞进 Meeting。
+- **KB 的 `promote` 只给 KB 界面 / Agent**：应用自己调会 `403 kb_forbidden`。所以归档必须一次 `ingest` 就带 `retention=durable`，别写"先 staging 再升格"。
+- **KB 连接配置没有 baseUrl**：只有 `ingestUrl`/`healthUrl`，取 origin 用；重复 ingest 只返回旧文档，不改 retention。
 - **KB 投影默认只写结论**：议题/决议/候选；转写只在用户点「归档到知识库」时写（KB 契约默认不进转写，产品决定要证据链）。
 - **候选转 `intaken` 必须带 `plannerRef`**（`sdemo.planner/...`）：没有引用说明"安排"没发生，`MeetingDomainService` 会直接拒绝。
 - **别在 `OnParametersSet` 里回调父组件**：参数设置期间重入渲染会让 WebView 渲染器静默卡死（窗口空白、日志无异常）。父组件回调只在用户点击时发。

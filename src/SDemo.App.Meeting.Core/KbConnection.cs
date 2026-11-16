@@ -31,9 +31,17 @@ public sealed record KbConnection(string BaseUrl, string Token)
             if (!File.Exists(configPath) || !File.Exists(tokenPath)) return null;
 
             var config = JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject;
-            var baseUrl = config?["baseUrl"]?.GetValue<string>();
-            var state = config?["state"]?.GetValue<string>();
 
+            // KB 的配置里没有 baseUrl/state，只有 ingestUrl/healthUrl 这类完整地址（见 Kb AGENTS §运行期文件）
+            var baseUrl = config?["baseUrl"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                var probe = config?["ingestUrl"]?.GetValue<string>() ?? config?["healthUrl"]?.GetValue<string>();
+                if (probe is not null && Uri.TryCreate(probe, UriKind.Absolute, out var uri))
+                    baseUrl = uri.GetLeftPart(UriPartial.Authority);
+            }
+
+            var state = config?["state"]?.GetValue<string>();
             if (string.IsNullOrWhiteSpace(baseUrl)) return null;
             if (state is not null && !state.Equals("running", StringComparison.OrdinalIgnoreCase)) return null;
 

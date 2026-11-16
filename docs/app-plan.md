@@ -142,13 +142,14 @@ SDemo.Meeting.exe
 | 组件异常导致整页空白 | 没有错误边界 | 根组件换成 `MainShell.razor`（`<ErrorBoundary>`），炸了显示异常正文 |
 | WebView2 偶发只画背景色 | 多实例共用 user data folder / 残留锁 | 每个实例用 `<数据根>\webview2`；实在不行设 `SDEMO_MEETING_DISABLE_GPU=1` |
 
-### P3 · 知识库投影（1 周）🟡 2026-11-16 写入链路完成
+### P3 · 知识库投影（1 周）✅ 2026-11-16 完成（含真实 KB 联调）
 
 | 任务 | 验收 | 状态 |
 | --- | --- | --- |
-| 「确认并归档」流程 | 结论 + 转写一起进 KB | ✅ 头部「归档到知识库」：先 `ingest`（含转写）再 `promote` 到 durable |
+| 「确认并归档」流程 | 结论 + 转写一起进 KB | ✅ 头部「归档到知识库」：一次 `ingest` 直接带 `retention=durable`（含转写） |
 | 投影状态可见 | 列表行 / 详情 / 同步条三处一致 | 🟡 详情页有状态 pill（未归档 / 投影中 / 已归档 / 归档失败）；列表行徽章未做 |
-| outbox 与 `/v1/ingest` + `/v1/promote` | KB 离线不阻塞会议 | ✅ 失败只记 `Failed` + 次数，启动时补投（次数 <5）；KB 不在时给可照做的提示 |
+| outbox 与 `/v1/ingest` | KB 离线不阻塞会议 | ✅ 失败只记 `Failed` + 次数，启动时补投（次数 <5）；KB 不在时给可照做的提示 |
+| 真实联调 | 文档真的进 KB | ✅ 已装 sdemo.kb（18110），`/v1/docs` 能看到文档；16 块、`retention=durable`、`ownerApp=sdemo.meeting` |
 
 **落地细节**
 
@@ -159,6 +160,14 @@ SDemo.Meeting.exe
   `...\sdemo.kb\tokens\sdemo.meeting.token`；两者缺一就当 KB 不在。
 - `Core/HttpKbTransport`：只做 POST + 解 `docId/version`，HTTP 失败也返回 `KbIngestResult(Error)` 而不是抛。
 - 传输抽象成 `IKbTransport`，所以整条投影逻辑在没有 KB 的机器上有 8 个测试覆盖。
+
+**联调发现的两个契约事实（已写进代码注释与 AGENTS）**
+
+1. **`promote` 应用自己调不了**：`KbService.IsPrivileged` 只认 `sdemo.kb` 与 `sdemo.agent`，`sdemo.meeting` 调 `/v1/promote` 直接
+   `403 kb_forbidden「该 app 没有这项能力」`。所以「归档」不能是"先 staging 再升格"，必须**一次就写 durable**。
+2. **KB 的 `sdemo.kb.json` 没有 `baseUrl`/`state`**，只有 `ingestUrl`/`healthUrl` 这类完整地址；
+   `KbConnection` 要从这些 URL 取 origin。另外**重复 ingest 同一实体只返回旧文档，不会改它的 retention**——
+   所以第一次写入的保留级别就是最终级别。
 
 **与 KB 契约的一处偏差（需要你知道）**
 

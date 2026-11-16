@@ -104,7 +104,7 @@ public sealed class ProjectionTests : IDisposable
         Assert.Contains("待办候选（待安排·王五·00:00:01）：补回滚演练记录", text);
         Assert.Contains("sdemo.kb/doc/01H9@v7", text);
         Assert.Equal("decision", document.Kind);
-        Assert.Equal("staging", document.Retention);
+        Assert.Equal("durable", document.Retention);
         Assert.StartsWith("sdemo.meeting/meeting/", document.EntityUri);
     }
 
@@ -125,17 +125,29 @@ public sealed class ProjectionTests : IDisposable
     }
 
     [Fact]
-    public async Task 归档会把_retention_升到_durable()
+    public async Task 归档直接以_durable_写入_不走_promote()
     {
         var transport = new FakeTransport();
         var service = CreateService(transport);
-        await service.ProjectAsync(_meeting.Id);
 
-        var promoted = await service.PromoteAsync(_meeting.Id);
+        await service.ProjectAsync(_meeting.Id, includeTranscript: true);
 
-        Assert.Equal(ProjectionStatus.Done, promoted.Status);
-        Assert.Contains("\"durable\"", transport.LastPromoteJson);
-        Assert.Contains("doc-001", transport.LastPromoteJson);
+        // KB 只让 KB 界面 / Agent 调 promote（应用自己调 403），所以归档必须一次写成 durable
+        Assert.Contains("\"durable\"", transport.LastIngestJson);
+        Assert.Null(transport.LastPromoteJson);
+    }
+
+    [Fact]
+    public void 可以显式指定_staging_与_durable_两种保留级别()
+    {
+        var domain = new MeetingDomainService(_db.Session).Get(_meeting.Id);
+
+        var staging = KbProjectionService.BuildDocument(domain, null, false, KbProjectionService.StagingRetention);
+        var durable = KbProjectionService.BuildDocument(domain, null, false, KbProjectionService.DurableRetention);
+
+        Assert.Equal("staging", staging.Retention);
+        Assert.Equal("durable", durable.Retention);
+        Assert.NotEqual(staging.IdempotencyKey, durable.IdempotencyKey);
     }
 
     [Fact]
@@ -171,12 +183,17 @@ public sealed class ProjectionTests : IDisposable
     {
         public string? IngestError { get; set; }
 
+        public string? LastIngestJson { get; private set; }
+
         public string? LastPromoteJson { get; private set; }
 
-        public Task<KbIngestResult> IngestAsync(string json, CancellationToken ct) =>
-            Task.FromResult(IngestError is null
+        public Task<KbIngestResult> IngestAsync(string json, CancellationToken ct)
+        {
+            LastIngestJson = json;
+            return Task.FromResult(IngestError is null
                 ? new KbIngestResult("doc-001", 7, null)
                 : new KbIngestResult(null, null, IngestError));
+        }
 
         public Task<KbIngestResult> PromoteAsync(string json, CancellationToken ct)
         {

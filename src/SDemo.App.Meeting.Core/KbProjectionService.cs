@@ -46,12 +46,13 @@ public sealed class KbProjectionService
     public async Task<ProjectionRecord> ProjectAsync(
         string meetingId,
         bool includeTranscript = false,
+        string retention = DurableRetention,
         CancellationToken ct = default)
     {
         var domain = _domain.Get(meetingId);
         var slice = includeTranscript ? _session.GetSlice(domain.Meeting.CurrentRunId ?? string.Empty) : null;
 
-        var document = BuildDocument(domain, slice, includeTranscript);
+        var document = BuildDocument(domain, slice, includeTranscript, retention);
         var previous = _session.GetProjection(meetingId);
         var attempts = (previous?.Attempts ?? 0) + 1;
 
@@ -88,7 +89,11 @@ public sealed class KbProjectionService
             _clock.GetUtcNow()));
     }
 
-    /// <summary>归档：把同一份 doc 的 retention 从 staging 升到 durable（不是新建一份）。</summary>
+    /// <summary>
+    /// 升格（staging → durable）。**KB 只允许 sdemo.kb 界面或 sdemo.agent 调**，应用自己调会 403
+    /// （KbService.IsPrivileged）。所以 Meeting 不用它：归档直接在 ingest 时带 durable。
+    /// 保留这个方法给后续 Agent 中继用。
+    /// </summary>
     public async Task<ProjectionRecord> PromoteAsync(string meetingId, CancellationToken ct = default)
     {
         var current = _session.GetProjection(meetingId)
@@ -124,7 +129,11 @@ public sealed class KbProjectionService
     }
 
     /// <summary>把会议变成 KB 的 ingest 文档。纯函数，便于测试。</summary>
-    public static KbIngestDocument BuildDocument(MeetingDomain domain, TranscriptSlice? slice, bool includeTranscript)
+    public static KbIngestDocument BuildDocument(
+        MeetingDomain domain,
+        TranscriptSlice? slice,
+        bool includeTranscript,
+        string retention = DurableRetention)
     {
         var meeting = domain.Meeting;
         var blocks = new JsonArray();
@@ -179,12 +188,12 @@ public sealed class KbProjectionService
             }
         }
 
-        var key = KeyOf(meeting.Id, includeTranscript, blocks.ToJsonString());
+        var key = KeyOf(meeting.Id, includeTranscript, $"{retention}|{blocks.ToJsonString()}");
 
         return new KbIngestDocument(
             Title: $"{meeting.StartAt.ToLocalTime():yyyy-MM-dd} · {meeting.Title}",
             Kind: Kind,
-            Retention: StagingRetention,
+            Retention: retention,
             IdempotencyKey: key,
             Blocks: blocks,
             EntityUri: EntityUriOf(meeting.Id),
