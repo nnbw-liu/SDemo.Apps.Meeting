@@ -179,7 +179,7 @@ public sealed class AsrContractTests
 
         Assert.False(availability.Available);
         Assert.Equal("模型未下载", availability.Reason);
-        Assert.Contains("874", availability.Detail);
+        Assert.Contains("MB", availability.Detail);
     }
 
     [Fact]

@@ -21,7 +21,7 @@ public sealed class WhisperCppProvider : IAsrProvider, IDisposable
     public WhisperCppProvider(MeetingModelCatalog? catalog = null, string? modelFile = null)
     {
         _catalog = catalog ?? new MeetingModelCatalog();
-        _modelFile = modelFile ?? MeetingModelCatalog.WhisperTurboQ8;
+        _modelFile = modelFile ?? ModelPacks.WhisperTurboQ8;
     }
 
     public string Id => EngineId;
@@ -41,14 +41,26 @@ public sealed class WhisperCppProvider : IAsrProvider, IDisposable
 
     public AsrAvailability Probe()
     {
-        if (!File.Exists(ModelPath))
+        var definition = ModelPacks.Find(_modelFile);
+
+        if (definition is not null)
         {
-            return AsrAvailability.No(
-                "模型未下载",
-                $"缺少 {_modelFile}，放到 {_catalog.ModelDir}（约 874 MB，见 asr-runtime §4）");
+            var installed = _catalog.Store.Get(definition.Id);
+            if (installed is null || installed.Status == ModelStatus.Missing)
+            {
+                return AsrAvailability.No("模型未下载",
+                    $"缺少 {definition.FileName}（{definition.ExpectedSizeText}），放到 {_catalog.ModelDir}");
+            }
+
+            return installed.Status == ModelStatus.Ready
+                ? AsrAvailability.Ok()
+                : AsrAvailability.No("模型校验失败",
+                    $"{installed.Path}：{installed.Status}；请运行 `meeting models --verify` 后重新导入");
         }
 
-        return AsrAvailability.Ok();
+        return File.Exists(ModelPath)
+            ? AsrAvailability.Ok()
+            : AsrAvailability.No("模型未下载", $"找不到自定义模型 {ModelPath}");
     }
 
     public async Task<AsrResult> TranscribeAsync(AsrJob job, IProgress<AsrProgress>? progress, CancellationToken ct)

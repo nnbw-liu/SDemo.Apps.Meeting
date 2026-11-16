@@ -443,7 +443,7 @@ public sealed record AsrResult(
 | --- | --- | --- |
 | B1 | VAD 分段 + 跨窗去重合并 | ✅ **2026-11-16 完成**：能量型 VAD（无模型、20 ms 帧、双阈值迟滞）+ **窗口打包**；81 秒真实音频 → 2 个窗口（0 s / 57 s），不再是 27 个句子级碎片 |
 | B2 | 进度、取消、续转、中断恢复 | ✅ 完成：增量落库（取消/崩溃保留已完成段）、`resume --run` 从第 N 段续、启动时 `running → interrupted`；测试覆盖取消与续转 |
-| B3 | 模型分发：下载 / sha256 / 占用显示 / 清理 | ⬜ 未做（当前手动放文件 + `models` 命令显示体积） |
+| B3 | 模型分发：下载 / sha256 / 占用显示 / 清理 | ✅ **2026-11-16 完成**：权重不进 git，两条来源——安装包自带（`tools/pack-models.ps1`）+ 用户导入（`meeting models --import`）；`models.json` 记 sha256；`--verify` 重算、`--remove` 清理、列表显示占用与状态 |
 | B4 | 低配档 `small` + 自动回落 | ⬜ 未做（目录里已有 small 条目，但没做自动回落） |
 | B5 | 术语表（hotwords / initial_prompt） | ✅ 已接：CLI `--hotwords "SDemo,Qwen3"` → whisper `WithPrompt`，参数落 `params_json` |
 | B6 | 语言 hint + 质检信号 S1–S4 | ✅ 已接：`--lang` 固定语言；`TranscriptQuality` 产出 warnings 并按时间回写到 `mtg_segment.warnings`；`show` 里以 ⚠ 显示 |
@@ -451,7 +451,17 @@ public sealed record AsrResult(
 
 **B1 的关键修正（实测踩出来的）**：VAD 在自然停顿处会把音频切成"一句话一段"——81 秒音频切出 **27 段**，等于 27 次模型调用、27 次音频编码，慢且丢上下文。所以加了一层**窗口打包**：相邻语音段若停顿 ≤4 秒且总长 ≤60 秒就并回一个窗口。加完同一段音频变成 **2 个窗口**，总耗时 19.4 秒（RTF 0.24）。
 
-**里程碑 B**：一场真实会议能全自动跑完，失败可恢复，混说处有提示。—— B1/B2/B5/B6 已就位；B3/B4/B7 未做。
+**B3 的形态（权重不进 git）**
+
+| 来源 | 怎么做 | 谁用 |
+| --- | --- | --- |
+| **安装包自带** | `pwsh tools/pack-models.ps1 -SourceDir <有模型的地方>` → 校验 sha256 → 复制到 `artifacts/models` + 写 `models.json` | 默认档（whisper-turbo-q8），开箱即用 |
+| **用户导入** | `meeting models --import <文件> [--id <packId>]` | 低配 `small`、升级档 Qwen3、自定义模型 |
+| **体检 / 清理** | `meeting models --verify <id>` / `--remove <id>` | 下载损坏、换硬盘、腾空间 |
+
+`models.json` 与运行期 manifest 同格式，所以安装包解到数据目录后**直接就是"已就绪"**。实测：真实 874 MB 模型的 sha256 `317eb69c…` 与内置常量一致，`--verify` 3.6 秒算完。
+
+**里程碑 B**：一场真实会议能全自动跑完，失败可恢复，混说处有提示。—— B1/B2/B3/B5/B6 已就位；B4（small 自动回落）、B7（结果页）未做。
 
 ### 阶段 C · 升级档 spike（1 周，可与 B 并行）**← 已部分完成，判定通过**
 

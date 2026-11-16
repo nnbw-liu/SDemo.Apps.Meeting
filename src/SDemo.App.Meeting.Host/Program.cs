@@ -40,7 +40,7 @@ public static class Program
                 "resume" => await ResumeAsync(app, o),
                 "list" => List(app, o),
                 "show" => Show(app, o),
-                "models" => Models(app),
+                "models" => Models(app, o),
                 "doctor" => Doctor(app),
                 "tools" => Tools(),
                 _ => Unknown(cmd),
@@ -306,14 +306,49 @@ public static class Program
         return 0;
     }
 
-    private static int Models(MeetingApp app)
+    private static int Models(MeetingApp app, Options o)
     {
-        Console.WriteLine($"模型目录：{app.ModelCatalog.ModelDir}");
-        foreach (var pack in app.ModelCatalog.WhisperPacks())
+        var store = app.ModelCatalog.Store;
+
+        if (o.Str("import") is { } importPath)
         {
-            Console.WriteLine($"  {pack.Id,-34} {pack.Bytes / 1024d / 1024d,8:F1} MB  {(pack.Bytes > 0 ? "已就绪" : "未下载")}  {(pack.Optional ? "可选" : "默认")}");
+            var result = store.Import(importPath, o.Str("id"), o.Flag("overwrite"));
+            Console.WriteLine($"已导入 {result.Definition.Id} → {result.Path}");
+            Console.WriteLine($"  {result.Bytes / 1024d / 1024d:F1} MB · sha256 {result.Sha256[..16]}…{(result.Overwrote ? "（已覆盖）" : "")}");
+            return 0;
         }
 
+        if (o.Str("remove") is { } removeId)
+        {
+            var removed = store.Remove(removeId);
+            Console.WriteLine(removed ? $"已移除 {removeId}" : $"{removeId} 未安装，无需移除");
+            return 0;
+        }
+
+        if (o.Str("verify") is { } verifyId)
+        {
+            var model = store.Verify(verifyId);
+            Console.WriteLine($"{model.Definition.Id,-22} {model.Status,-14} {model.ActualSha256?[..16]}…");
+            return model.IsReady ? 0 : 3;
+        }
+
+        Console.WriteLine($"模型目录：{store.ModelDir}");
+        Console.WriteLine($"总占用  ：{store.TotalBytes() / 1024d / 1024d / 1024d:F2} GB");
+        Console.WriteLine();
+        Console.WriteLine($"{"id",-22} {"档位",-8} {"状态",-14} {"大小",10}  文件");
+
+        foreach (var model in store.List())
+        {
+            var size = model.Status == ModelStatus.Missing
+                ? model.Definition.ExpectedSizeText
+                : $"{model.ActualBytes / 1024d / 1024d:F0} MB";
+
+            Console.WriteLine($"{model.Definition.Id,-22} {model.Definition.Tier,-8} {model.Status,-14} {size,10}  {model.Definition.FileName}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("导入自己的模型：meeting models --import <文件> [--id <packId>]");
+        Console.WriteLine("校验 / 移除   ：meeting models --verify <packId> | --remove <packId>");
         return 0;
     }
 
@@ -372,7 +407,7 @@ public static class Program
           meeting resume      --run <runId> [--audio <wav>] [--lang zh] [--engine ...]
           meeting list        [--limit 20]
           meeting show        <id>
-          meeting models
+          meeting models      [--import <文件> [--id <packId>] [--overwrite]] [--verify <id>] [--remove <id>]
           meeting doctor
           meeting tools
 

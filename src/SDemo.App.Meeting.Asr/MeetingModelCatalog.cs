@@ -2,39 +2,47 @@ using SDemo.App.Meeting.Contracts;
 
 namespace SDemo.App.Meeting.Asr;
 
-/// <summary>模型包在磁盘上的位置与清单。默认 &lt;数据根&gt;\models，可用环境变量覆盖。</summary>
+/// <summary>
+/// 引擎看向模型库的窗口：把"包身份 → 文件路径 / 是否就绪"翻译成引擎能用的形状。
+/// 真正的文件与 manifest 管理在 <see cref="MeetingModelStore"/>。
+/// </summary>
 public sealed class MeetingModelCatalog
 {
-    public const string WhisperTurboQ8 = "ggml-large-v3-turbo-q8_0.bin";
-    public const string WhisperSmallQ5 = "ggml-small-q5_1.bin";
+    public const string WhisperTurboQ8 = ModelPacks.WhisperTurboQ8;
+    public const string WhisperSmallQ5 = ModelPacks.WhisperSmallQ5;
 
-    public MeetingModelCatalog(string? modelDir = null) =>
-        ModelDir = modelDir ?? MeetingConstants.ResolveModelDir();
+    public MeetingModelCatalog(string? modelDir = null) => Store = new MeetingModelStore(modelDir);
 
-    public string ModelDir { get; }
+    public MeetingModelStore Store { get; }
 
-    public string PathOf(string fileName) => Path.Combine(ModelDir, fileName);
+    public string ModelDir => Store.ModelDir;
 
-    public bool Exists(string fileName) => File.Exists(PathOf(fileName));
+    /// <summary>接受包 id 或文件名；未知名字按"直接拼在模型目录下"处理（便于测试与自定义模型）。</summary>
+    public string PathOf(string idOrFileName) =>
+        ModelPacks.Find(idOrFileName) is { } definition
+            ? Store.PathOf(definition)
+            : Path.Combine(ModelDir, idOrFileName);
 
-    public long SizeOf(string fileName) => Exists(fileName) ? new FileInfo(PathOf(fileName)).Length : 0;
+    public bool Exists(string idOrFileName) => File.Exists(PathOf(idOrFileName));
 
-    /// <summary>whisper 系（Whisper.net 运行时自带二进制，只需要模型文件）。</summary>
-    public IReadOnlyList<AsrModelPack> WhisperPacks() => new[]
+    public long SizeOf(string idOrFileName)
     {
-        new AsrModelPack(
-            WhisperTurboQ8,
-            "whisper large-v3-turbo (Q8_0)",
-            SizeOf(WhisperTurboQ8),
-            TimestampPrecision.Segment,
-            new[] { "zh", "en", "ja", "yue", "auto" },
-            Optional: false),
-        new AsrModelPack(
-            WhisperSmallQ5,
-            "whisper small (Q5_1)",
-            SizeOf(WhisperSmallQ5),
-            TimestampPrecision.Segment,
-            new[] { "zh", "en", "ja", "auto" },
-            Optional: true),
-    };
+        var path = PathOf(idOrFileName);
+        return File.Exists(path) ? new FileInfo(path).Length : 0;
+    }
+
+    /// <summary>给 <c>meeting models</c> 与 doctor 用的快照。</summary>
+    public IReadOnlyList<InstalledModel> ListInstalled() => Store.List();
+
+    public IReadOnlyList<AsrModelPack> WhisperPacks() =>
+        Store.List()
+            .Where(m => m.Definition.FileName.StartsWith("ggml-", StringComparison.OrdinalIgnoreCase))
+            .Select(m => new AsrModelPack(
+                m.Definition.Id,
+                m.Definition.DisplayName,
+                m.ActualBytes,
+                m.Definition.Timestamps,
+                m.Definition.Languages,
+                m.Definition.Optional))
+            .ToArray();
 }

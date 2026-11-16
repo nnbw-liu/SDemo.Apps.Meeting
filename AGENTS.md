@@ -9,7 +9,7 @@
 ## 现状（2026-11-16）
 
 ✅ **阶段 A 已落地**：8 个工程 + `SDemo.Meeting.slnf`，`import → transcribe → list/show` 端到端跑通。
-🟡 **阶段 B 完成 4/7**：VAD 分段（含窗口打包）、增量落库/取消/续转、hotwords、语言 hint + 质检告警。
+🟡 **阶段 B 完成 5/7**：VAD 分段（含窗口打包）、增量落库/取消/续转、模型库（打包 + 导入 + 校验 + 清理）、hotwords、语言 hint + 质检告警。
 A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x80070005），需在有权限的机器上复验。
 
 | 层 | 状态 |
@@ -24,9 +24,11 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 
 ## 开工先做三件事
 
-1. ASR 运行时 v0.4（[asr-runtime.md](docs/asr-runtime.md)）：阶段 A 完成，阶段 B 的 B1/B2/B5/B6 已就位；**下一步 B3 模型分发（下载 + sha256 + 占用/清理）、B4 small 低配档自动回落、B7 结果页**。
+1. ASR 运行时 v0.4（[asr-runtime.md](docs/asr-runtime.md)）：阶段 A 完成；阶段 B 的 B1/B2/B3/B5/B6 已就位；**下一步 B4（`small` 低配档自动回落）、B7（结果页，需要 WPF）**。
 2. 建 WPF 组合根与 MCP server（当前 Host 是 CLI，界面和工具面还没接）。
 3. `workspaces/meeting.json` 已是 `active`。
+
+模型侧：默认档由安装包自带（`tools/pack-models.ps1`），用户在 `meeting models` 里能看到状态、导入自己的模型、校验与清理。
 
 ## 必读
 
@@ -69,6 +71,7 @@ dotnet test tests\SDemo.Meeting.Tests -c Release
 - 双路采集（`room` / `online`）要分别转写后按时间合并，不能先混音再转写。
 - 说话人 v1 手动标注；`IDiarizationProvider` 先留空实现，别提前接模型。
 - 模型文件（数百 MB）**不许进 git**：放 `.gitignore`，首次运行按需下载并校验 sha256。
+- **权重两条来源**：安装包用 `tools/pack-models.ps1` 打（校验 sha256 后写 `models.json`）；用户侧走 `meeting models --import <文件> [--id <packId>]`。新增模型只改 `Contracts/ModelPacks.cs` + `pack-models.ps1` 两张表，两处必须一致。
 - **别自己手写 whisper 的 P/Invoke 结构体**：`whisper_full_default_params` 按值返回 struct，用 `IntPtr` 接会直接 `0xC0000005`。用 Whisper.net（同一份 ggml-org 原生库）。
 - **WASAPI 采集会挂死**：无麦克风权限 / 虚拟声卡会返回 `0x80070005`，老的 `waveInOpen` 甚至直接阻塞。`DualTrackRecorder` 用看门狗（启动 10 s、首包 5 s）保证快速失败，别退回同步调用。
 - **云端 ASR 的口径要以实测为准**：DeepSeek 的 `/v1/chat/completions` **不收音频**（`deepseek-flash` 的 `input_modalities` 只有 text/image，`input_audio` 会 422）；能用的是独立端点 `POST /v1/tools/asr`（multipart，≤8 MB / ≤120 秒，无时间戳）。
