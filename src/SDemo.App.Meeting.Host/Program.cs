@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using SDemo.App.Meeting.Asr;
 using SDemo.App.Meeting.Audio;
@@ -43,6 +44,7 @@ public static class Program
                 "models" => Models(app, o),
                 "doctor" => Doctor(app),
                 "tools" => Tools(),
+                "serve" => await ServeAsync(app, o),
                 _ => Unknown(cmd),
             };
         }
@@ -402,7 +404,49 @@ public static class Program
 
     private static int Tools()
     {
-        Console.WriteLine(MeetingToolCatalog.ToJsonArray());
+        var array = new System.Text.Json.Nodes.JsonArray();
+        foreach (var tool in MeetingToolCatalog.Tools) array.Add(tool.ToJson());
+        Console.WriteLine(array.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    // ── serve ───────────────────────────────────────────────────────────
+
+    /// <summary>起回环 HTTP：/mcp 给 DesktopAgent 用，/v1/health 给宿主探活。</summary>
+    private static async Task<int> ServeAsync(MeetingApp app, Options o)
+    {
+        var token = o.Str("token")
+                    ?? Environment.GetEnvironmentVariable("SDEMO_APP_TOKEN")
+                    ?? Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+
+        var mcp = new MeetingMcpServer(new MeetingQuery(app.Session), app.Meetings);
+        using var server = new McpHttpServer(
+            token,
+            MeetingConstants.AppId,
+            "会议",
+            "0.1.0",
+            mcp,
+            writeRuntimeFile: !o.Flag("no-runtime-file"));
+
+        server.Start(o.Int("port", 0));
+
+        using var done = new ManualResetEventSlim();
+        server.ShutdownRequested = done.Set;
+
+        Console.WriteLine($"sdemo.meeting MCP 已启动：{server.BaseUrl}/mcp");
+        Console.WriteLine($"  应用配置：{McpHttpServer.RuntimePathOf(MeetingConstants.AppId)}");
+        if (o.Flag("show-token")) Console.WriteLine($"  token   ：{token}");
+        Console.WriteLine("  工具    ：" + string.Join(", ", MeetingToolCatalog.Tools.Select(t => t.Name)));
+        Console.WriteLine("Ctrl+C 退出（或 POST /v1/shutdown）");
+
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            done.Set();
+        };
+
+        await Task.Run(done.Wait);
+        server.Stop();
         return 0;
     }
 
@@ -430,6 +474,7 @@ public static class Program
           meeting list        [--limit 20]
           meeting show        <id>
           meeting models      [--import <文件> [--id <packId>] [--overwrite]] [--verify <id>] [--remove <id>]
+          meeting serve       [--port 0] [--token <hex>] [--show-token] [--no-runtime-file]
           meeting doctor
           meeting tools
 

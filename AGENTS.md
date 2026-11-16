@@ -11,6 +11,7 @@
 ✅ **阶段 A 已落地**：8 个工程 + `SDemo.Meeting.slnf`，`import → transcribe → list/show` 端到端跑通。
 ✅ **阶段 B 全部完成（B1–B7）**：VAD 分段（含窗口打包）、增量落库/取消/续转、模型库（打包 + 导入 + 校验 + 清理）、低配档自动回落、hotwords、语言 hint + 质检告警、转写结果页（WPF + BlazorWebView）。
 A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x80070005），需在有权限的机器上复验。
+🔌 **MCP 服务已接**：`meeting serve` 起回环 HTTP（`/mcp` + Bearer token、`/v1/health` 免鉴权、`/v1/shutdown` 优雅退出），启动写 `%LOCALAPPDATA%\SDemo\Hub\apps\sdemo.meeting.json`、退出改 `state=stopped`。
 
 | 层 | 状态 |
 | --- | --- |
@@ -19,14 +20,14 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 | `Core` | `MeetingService` 状态机、`TranscriptionRunner` 编排、`TranscriptQuality` 质检信号 |
 | `Asr` | `WhisperCppProvider`（Whisper.net 1.8.1）、`ChatAudioProvider`（回环/云端 chat）、`DeepSeekToolsProvider`（`/v1/tools/asr`）、模型目录 |
 | `Audio` | `DualTrackRecorder`（WASAPI 麦克风 + 环回，带启动超时看门狗）、`WavDownmixer` |
-| `Mcp` | 4 个只读工具目录（server 待后续阶段） |
+| `Mcp` | `MeetingMcpServer`（JSON-RPC：initialize / ping / tools/list / tools/call）+ 4 个只读工具（meeting_list / meeting_get / meeting_transcript / meeting_runs），带风险元数据 |
 | `Web` | 结果页 Razor 组件 `MeetingResult.razor`（列表 / 段落 / 时间码 / 说话人标注） |
 | `Viewer` | WPF + BlazorWebView 外壳（进程内组件，不起 HTTP）；`SDemo.Meeting.Viewer.exe` |
 | `Host` | CLI：`record` / `import` / `transcribe` / `resume` / `list` / `show` / `models` / `doctor` / `tools` |
 
 ## 开工先做三件事
 
-1. **阶段 A / B 都完成了**（[asr-runtime.md](docs/asr-runtime.md)）。下一步：MCP server（工具目录已就位，JSON-RPC 还没接）、议题/决议/候选三类表（`mtg_topic` / `mtg_decision` / `mtg_action`）、会议分析交给 Agent 的批处理链路。
+1. **阶段 A / B 都完成了**（[asr-runtime.md](docs/asr-runtime.md)）；MCP 服务（4 个只读工具）已接。下一步：**写工具 + 审计**（标说话人、建会议、触发转写）、议题/决议/候选三类表（`mtg_topic` / `mtg_decision` / `mtg_action`）、会议分析交给 Agent 的批处理链路。
 2. Host 仍是 CLI；结果页是独立的 `SDemo.Meeting.Viewer.exe`（WPF + BlazorWebView）。
 3. `workspaces/meeting.json` 已是 `active`。
 
@@ -60,6 +61,9 @@ dotnet test tests\SDemo.Meeting.Tests -c Release
 
 # 转写结果页（WPF + BlazorWebView）
 src\SDemo.App.Meeting.Viewer\bin\Release\net10.0-windows10.0.19041.0\SDemo.Meeting.Viewer.exe --data-dir=<数据根>
+
+# MCP 服务（给 DesktopAgent 用）
+src\SDemo.App.Meeting.Host\bin\Release\net10.0-windows10.0.19041.0\SDemo.Meeting.exe serve --port 18080 --show-token
 ```
 
 ## 铁律
@@ -83,6 +87,8 @@ src\SDemo.App.Meeting.Viewer\bin\Release\net10.0-windows10.0.19041.0\SDemo.Meeti
 - **Key 只走环境变量或命令行参数**（`SDEMO_ASR_API_KEY`），不落库、不进日志、不进仓；云端调用必须 `--allow-remote` 且每次打印"音频将上传"。产品化路径是 Agent 中继，不是 Meeting 直连。
 - **VAD 必须打包窗口**：能量 VAD 会在每个自然停顿处断开，81 秒音频切出 27 段 = 27 次模型调用。`VadSegmenter` 的 `MaxPackGapMs`（默认 4 秒）负责把短停顿并回一个窗口，别删。
 - **分段引擎按 `NeedsVad` 分流**：whisper 自带长音频能力（整段一次），chat-audio / deepseek-tools 必须切段。判断依据是能力声明，不是引擎名。
+- **`HttpListener` 对空 POST 回 411**：`POST /v1/shutdown` 这类无 body 的请求必须带 `Content-Length: 0`（curl 用 `-d ''`），否则在进到处理函数之前就被拒。
+- **MCP 工具面 v1 只读**：写工具（标说话人、建会议、触发转写）要等审计与审批落地再加，别提前开。
 - 测试工程是 `net10.0`，**不能引用 `net10.0-windows` 的 Audio 工程**；采集只能靠 CLI 人工验。
 
 ## 不要读

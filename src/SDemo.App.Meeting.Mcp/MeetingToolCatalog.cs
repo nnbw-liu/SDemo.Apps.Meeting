@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace SDemo.App.Meeting.Mcp;
 
@@ -9,82 +9,94 @@ public enum ToolRisk
     High,
 }
 
-public sealed record MeetingTool(
+/// <summary>
+/// 一个 MCP 工具的完整声明。风险等级由应用声明，Agent 只按等级执行、不硬编码工具名
+/// （docs/integration.md §4、hub-protocol「风险与审批」）。
+/// </summary>
+public sealed record McpToolDefinition(
     string Name,
     string Description,
+    string InputSchemaJson,
     ToolRisk Risk,
     bool ReadOnly,
-    string InputSchemaJson);
+    bool Destructive = false,
+    bool Idempotent = true)
+{
+    public JsonObject ToJson() => new()
+    {
+        ["name"] = Name,
+        ["description"] = Description,
+        ["inputSchema"] = JsonNode.Parse(InputSchemaJson),
+        ["annotations"] = new JsonObject
+        {
+            ["readOnlyHint"] = ReadOnly,
+            ["destructiveHint"] = Destructive,
+            ["idempotentHint"] = Idempotent,
+        },
+        ["_meta"] = new JsonObject
+        {
+            ["sdemo/risk"] = Risk.ToString().ToLowerInvariant(),
+            ["sdemo/approval"] = Risk == ToolRisk.Low ? "none" : "once",
+            ["sdemo/writes"] = !ReadOnly,
+        },
+    };
+}
 
 /// <summary>
-/// MCP 工具目录。v1 只暴露只读工具；写入面（mark_action / create）留到后续阶段，
-/// 免得工具面在需求没稳之前先膨胀（integration.md X-12）。
+/// v1 只暴露只读工具。写入面（标说话人、建会议、转写触发）留到 MCP 写路径与审计就位之后，
+/// 避免工具面在审批/审计没落地前先膨胀（integration.md X-12）。
 /// </summary>
 public static class MeetingToolCatalog
 {
-    public static IReadOnlyList<MeetingTool> Tools { get; } = new[]
+    public static IReadOnlyList<McpToolDefinition> Tools { get; } = new[]
     {
-        new MeetingTool(
+        new McpToolDefinition(
             "meeting_list",
-            "列出会议（按开始时间倒序）。返回 id / 标题 / 时间 / 状态 / 是否有转写。",
-            ToolRisk.Low,
-            true,
+            "列出会议（按开始时间倒序）。返回 id / 标题 / 时间 / 状态 / 段数。",
             """
-            {"type":"object","properties":{
+            {"type":"object","additionalProperties":false,"properties":{
               "limit":{"type":"integer","minimum":1,"maximum":200,"default":20},
-              "since":{"type":"string","description":"ISO 时间，只要这之后的会议"}
+              "since":{"type":"string","format":"date-time","description":"只要这之后的会议（ISO-8601，带时区）"}
             }}
-            """),
-
-        new MeetingTool(
-            "meeting_get",
-            "取一场会议：会议头 + 当前转写 run + 议题/决议的占位结构。",
+            """,
             ToolRisk.Low,
-            true,
+            ReadOnly: true),
+
+        new McpToolDefinition(
+            "meeting_get",
+            "取一场会议：会议头 + 音频 + 当前转写 run 的摘要（不含正文）。",
             """
-            {"type":"object","properties":{
+            {"type":"object","additionalProperties":false,"properties":{
               "id":{"type":"string","description":"会议 id"}
             },"required":["id"]}
-            """),
-
-        new MeetingTool(
-            "meeting_transcript",
-            "取某次转写的片段。可按时间窗裁剪，避免一次性把整场塞进上下文。",
+            """,
             ToolRisk.Low,
-            true,
+            ReadOnly: true),
+
+        new McpToolDefinition(
+            "meeting_transcript",
+            "取某次转写的片段。支持时间窗与条数裁剪，避免一次性把整场塞进上下文。",
             """
-            {"type":"object","properties":{
+            {"type":"object","additionalProperties":false,"properties":{
               "id":{"type":"string","description":"会议 id"},
               "runId":{"type":"string","description":"可选，默认当前 run"},
-              "fromMs":{"type":"integer"},
-              "toMs":{"type":"integer"},
+              "fromMs":{"type":"integer","minimum":0},
+              "toMs":{"type":"integer","minimum":0},
               "limit":{"type":"integer","minimum":1,"maximum":500,"default":200}
             },"required":["id"]}
-            """),
+            """,
+            ToolRisk.Low,
+            ReadOnly: true),
 
-        new MeetingTool(
+        new McpToolDefinition(
             "meeting_runs",
             "列出某场会议的所有转写 run（换过引擎或重跑过会有多条）。",
-            ToolRisk.Low,
-            true,
             """
-            {"type":"object","properties":{
+            {"type":"object","additionalProperties":false,"properties":{
               "id":{"type":"string","description":"会议 id"}
             },"required":["id"]}
-            """),
+            """,
+            ToolRisk.Low,
+            ReadOnly: true),
     };
-
-    public static string ToJsonArray()
-    {
-        var payload = Tools.Select(t => new
-        {
-            name = t.Name,
-            description = t.Description,
-            risk = t.Risk.ToString().ToLowerInvariant(),
-            readOnly = t.ReadOnly,
-            inputSchema = JsonDocument.Parse(t.InputSchemaJson).RootElement,
-        });
-
-        return JsonSerializer.Serialize(payload);
-    }
 }
