@@ -8,3 +8,8 @@ TestResults/
 *.db-wal
 models/
 recordings/
+
+# asr-spike 本机测试产物（合成音频 / 原始响应 / 基准输出）
+tools/asr-spike/samples/
+tools/asr-spike/raw-*.json
+tools/asr-spike/bench.md

@@ -7,35 +7,70 @@
 
 ---
 
+## 0. 已验证的结论（2026-11-16）
+
+| 后端 | 形状 | 结果 |
+| --- | --- | --- |
+| **llama.cpp server** | `--shape llama`（`input_audio`） | ✅ 可用。中文 27 秒 **零错**，RTF 0.20× |
+| **LM Studio** | `--shape llama` | ❌ 400：只接受 `text` / `image_url` |
+| **LM Studio** | `--shape lms`（`images` 字段） | ⚠️ **200 + 静默丢弃音频**，返回 `language None<asr_text>` |
+| **LM Studio** | `--shape ollama`（`/api/chat`） | ❌ 200 + 错误体 `Unexpected endpoint` |
+| LM Studio | `/v1/audio/transcriptions` | ❌ 415（只收 JSON） |
+
+**不要用 LM Studio 跑 ASR**。它不会报错，只会给你一段"看起来成功"的空转写。
+先用 `probe --audio` 验证：它比对带/不带音频的 `prompt_tokens`，能捉住静默丢弃。
+
+---
+
 ## 1. 前置
 
 | 项 | 说明 |
 | --- | --- |
 | .NET 10 SDK | `dotnet build` 能过即可 |
 | **ffmpeg**（强烈建议） | 负责转 16 kHz 单声道 + 切片段。**不在 PATH 里也能用 `--ffmpeg <路径>`**；完全没有时只接受已合规的 16 kHz WAV，且不能切片段 |
-| 模型 | llama.cpp 的 GGUF，或 Ollama 的社区包，二选一 |
+| 模型 | **llama.cpp 的 GGUF + mmproj**（推荐）；Ollama 社区包次之 |
 
-> ⚠️ 当前这台机器 PATH 里没有 ffmpeg。要么先 `winget install Gyan.FFmpeg`（或放个 ffmpeg.exe 到任意目录再用 `--ffmpeg` 指定），要么先把音频转成 16 kHz / 单声道 / 16-bit WAV 再喂。
+> 当前这台机器 PATH 里没有 ffmpeg。要么 `winget install Gyan.FFmpeg`，要么用 `make-test-audio.ps1` 直接产出 16 kHz WAV。
+
+### 没有真会议录音时：合成测试音频
+
+```powershell
+pwsh ./make-test-audio.ps1          # 生成 zh/en/ja/mixed 四段到 ./samples
+pwsh ./make-test-audio.ps1 -ListVoices
+```
+
+它用 Windows SAPI 合成 16 kHz / 单声道 / 16-bit WAV。**朗读腔不等于远场多人会议**，只用于验证链路与速度；WER 必须用真录音另测（asr-runtime §11 R4）。
 
 ---
 
 ## 2. 起后端
 
-### ① llama.cpp server（推荐：版本可控、直接吃官方 GGUF）
+### ① llama.cpp server（**唯一验证可用的路径**）
+
+不需要完整源码，只要官方 release 的 `llama-server.exe`（windows-cpu-x64 包约 24 MB），
+模型可以直接用 LM Studio 已经下好的那两个文件：
 
 ```powershell
-# 从 llama.cpp releases 拿 llama-server.exe，然后：
-llama-server -hf ggml-org/Qwen3-ASR-1.7B-GGUF:Q8_0 --host 127.0.0.1 --port 8080
-# 低配先试 0.6B：
-llama-server -hf ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0 --host 127.0.0.1 --port 8080
+llama-server -m "C:\Users\<你>\.lmstudio\models\ggml-org\Qwen3-ASR-0.6B-GGUF\Qwen3-ASR-0.6B-Q8_0.gguf" `
+             --mmproj "C:\Users\<你>\.lmstudio\models\ggml-org\Qwen3-ASR-0.6B-GGUF\mmproj-Qwen3-ASR-0.6B-Q8_0.gguf" `
+             --host 127.0.0.1 --port 8080 --jinja -ngl 0 -c 8192
 ```
 
-### ② Ollama（社区包：省事，但单次 ≤ 60 秒、返回带 `language` 前缀）
+启动日志里必须出现这两行，否则音频链路没起来：
+
+```
+init_audio: audio input is in experimental stage ...
+load_model: loaded multimodal model, '...mmproj-....gguf'
+```
+
+### ② Ollama（社区包，未在本机验证；单次 ≤ 60 秒）
 
 ```powershell
 ollama pull frozenlab/qwen3-asr:1.7b     # 约 2.5 GB
 ollama serve                              # 默认 127.0.0.1:11434
 ```
+
+### ✗ LM Studio（**不行**，见 §0）
 
 ---
 
@@ -43,16 +78,19 @@ ollama serve                              # 默认 127.0.0.1:11434
 
 ```powershell
 # 起了没、有什么模型
-asr-spike probe --shape llama
+asr-spike probe --shape llama --base-url http://127.0.0.1:8080
 
-# 只验证请求形状与体积，不发请求（模型还在下载时也能跑）
+# ★ 接新后端第一步：确认它真的收了音频（比对 prompt_tokens 增量）
+asr-spike probe --shape llama --base-url http://127.0.0.1:8080 --model qwen3-asr --audio
+
+# 只验证请求形状与体积，不发请求
 asr-spike run --input 会议.m4a --start 00:12:31 --duration 60 --model qwen3-asr --dry-run
 
 # 真跑一次
-asr-spike run --input 会议.m4a --start 00:12:31 --duration 60 --model qwen3-asr --save-raw raw.json
+asr-spike run --shape llama --base-url http://127.0.0.1:8080 --model qwen3-asr --input samples\zh-60s.wav --prompt "" --save-raw raw.json
 
 # 测速（预热 1 次 + 测 3 次，首次含模型加载，必须预热）
-asr-spike bench --input 会议.m4a --duration 60 --model qwen3-asr --repeat 3 --out bench.md
+asr-spike bench --input samples\zh-60s.wav --model qwen3-asr --repeat 3 --warmup 1 --out bench.md
 
 # 解析器自测（不需要模型）
 asr-spike parse --self-test
@@ -62,12 +100,13 @@ asr-spike parse --self-test
 
 | 参数 | 说明 |
 | --- | --- |
-| `--shape` | `llama`/`openai` → `input_audio` 内容块；`ollama` → `images` 字段。**填错了一定失败**，这是两种不同的载荷 |
-| `--duration` | 建议 **≤ 60 秒**（Ollama 社区包的上限；llama.cpp 内部按 8 秒窗口预处理） |
+| `--shape` | `llama`/`openai` → `input_audio`；`ollama` → `/api/chat`+`images`；`lms` → `/v1/chat/completions`+`images`（用来复现 LM Studio 的静默丢弃） |
+| `--duration` | 建议 **≤ 60 秒**（升级档分段目标；实测 81 秒也能跑） |
 | `--warmup` | 默认 1。第一次调用包含模型加载，不预热会把首次耗时算进去 |
 | `--out` | 追加一行 Markdown，直接贴进 `asr-runtime.md` §7 |
+| `--prompt` | Qwen3-ASR 官方用法是**空 prompt**；LM Studio 之类严格服务会拒空 text |
 
-退出码：`0` 成功 · `1` 参数/IO 错误 · `2` HTTP/连接失败 · `3` 解析出空文本。
+退出码：`0` 成功 · `1` 参数/IO 错误 · `2` HTTP/连接失败 · `3` 解析出空文本 · **`4` 音频没进模型（静默丢弃）**
 
 ---
 

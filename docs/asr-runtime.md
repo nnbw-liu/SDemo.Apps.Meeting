@@ -1,7 +1,7 @@
 # sdemo.meeting · ASR 运行时
 
-> 状态：**设计稿 v0.3（2026-11-15）· 待真机基准后定稿**
-> 修订：v0.2 推翻 v0.1 的主次（whisper 是主力，Qwen3-ASR 是升级档）；v0.3 修正升级档的接入形态（**多模态 chat，不是 `/v1/audio/transcriptions`**），见 §4.2–4.5。
+> 状态：**设计稿 v0.4（2026-11-16）· 阶段 C 已在 CPU 上证通**
+> 修订：v0.2 推翻主次（whisper 主力 / Qwen3 升级档）；v0.3 修正接入形态（多模态 chat）；**v0.4 填入真机实测数，升级档默认定为 0.6B**（§7）。
 > 范围：本地转写引擎、引擎升级、模型分发、分段与时间戳、性能档位、失败降级
 > 关联：[asr-relay 契约](../../../docs/contracts/asr-relay.md)（云端中继，本版不启用）· [meeting-design.md](meeting-design.md) §5 · [requirements.md](requirements.md) MT-03 / MT-04 / MT-05
 > 一句话：**whisper 保证"每场都能转完"，Qwen3 负责"转不准的那几段"。**
@@ -14,8 +14,10 @@
 | --- | --- |
 | **默认引擎（主力）** | **whisper.cpp `large-v3-turbo` `q8_0`**（874 MB，MIT，99 语种，段级时间戳与标点免费） |
 | 低配档 | whisper `small` `q5_1`（190 MB），老机器/快速草稿 |
-| **升级档（后备）** | **Qwen3-ASR-1.7B**（Apache-2.0，30 语种 + 22 中文方言，官方 GGUF Q8_0 = 2.5 GB） |
-| 升级档接入形态 | **多模态 chat（`/v1/chat/completions` + audio），不是 `/v1/audio/transcriptions`**；Ollama / llama.cpp 都是这个形状（§4.2–4.5） |
+| **升级档（后备）** | **Qwen3-ASR-0.6B**（Apache-2.0；CPU 实测 RTF 0.20×，30 分钟音频约 6 分钟；体积 1.0 GB + mmproj 0.35 GB） |
+| 升级档的大号 | Qwen3-ASR-1.7B（2.5 GB），有独显再下，默认不推 |
+| 升级档接入形态 | **多模态 chat（`/v1/chat/completions` + `input_audio`），不是 `/v1/audio/transcriptions`**；llama.cpp server 实测通过，**LM Studio 不收音频（会静默丢弃）**（§4.3） |
+| 升级档托管 | **随包分发 llama.cpp server**（`--mmproj` 加载音频投影），非 Ollama、非 LM Studio |
 | 时间戳增强 | Qwen3-ForcedAligner-0.6B（可选包，字级对齐；不下就退到段级——而段级由我们自己的 VAD 保证） |
 | 要不要 Python | **不要**。whisper 走 P/Invoke；Qwen3 走 llama.cpp server / Ollama / 进程内 llama.cpp，均无 Python |
 | 云端 | 本版不接。中继契约先写形状，见 [asr-relay.md](../../../docs/contracts/asr-relay.md) |
@@ -134,19 +136,28 @@ Qwen3-ASR 单模型带语种识别、并且支持极长音频（官方推理框�
 
 **Qwen3-ASR 是 B，不是 A。** 这个区别直接决定三件事：有没有时间戳、能不能一次喂很长的音频、输出要不要解析。
 
-### 4.3 实测现状（2026-11 查证）
+### 4.3 实测结果（2026-11-16，真机验证）
 
-**Ollama**
+**结论先行：`OpenAI 兼容 ≠ 能喂音频`。这条已经用实测钉死了。**
 
-- stock Ollama **没有** `/v1/audio/transcriptions`。社区包 `frozenlab/qwen3-asr` 用官方 GGUF（`1.7b` Q8_0 = 2.5 GB / `0.6b` = 1.0 GB），走的是 `/api/chat`，**把音频 base64 塞进 `images` 字段、prompt 留空**；返回形如 `language Chinese<asr_text>…`，要剥前缀。
-- 单次约 **≤ 60 秒**音频（16 kHz 单声道 WAV）。
-- **结论：它是一个"多模态 chat 模型"，不是一个"ASR 端点"。** 说"通过标准 OpenAI 格式接入"在 Ollama 上并不成立——除非我们再加一层适配。
+| 运行时 | 端点 + 形状 | 结果 |
+| --- | --- | --- |
+| **llama.cpp server** `b12428` | `/v1/chat/completions` + `input_audio` | ✅ **可用**，中文 27 秒整段零错误（见 §7） |
+| **LM Studio** 0.4.x | `/v1/chat/completions` + `input_audio` | ❌ HTTP 400：`content objects must be 'text' or 'image_url'` |
+| LM Studio | `/v1/chat/completions` + `audio_url` | ❌ HTTP 400 |
+| LM Studio | `/v1/chat/completions` + `images` 字段 | ⚠️ **HTTP 200，但音频被静默丢弃**：`prompt_tokens` 9→9，返回 `language None<asr_text>`（看起来像"转写成功但内容为空"） |
+| LM Studio | `/api/chat`（Ollama 原生形状） | ❌ HTTP 200 + 错误体 `Unexpected endpoint (POST /api/chat)` |
+| LM Studio | `/v1/audio/transcriptions`（multipart） | ❌ HTTP 415：`POST requests must use 'application/json'` |
+| Ollama（社区包） | `/api/chat` + `images` | 未在本机验证（未安装）；按社区文档，单次 ≤ 60 秒 |
 
-**llama.cpp**
+⚠️ **最危险的是"静默丢弃"那一行**：它不报错、返回 200、给出一个结构合法的空 ASR 输出。任何"看起来接了但没转出字"的排查，都要先做一次 token 增量探测（工具里已实现：`asr-spike probe --audio`）。
 
-- 官方已支持 `ggml-org/Qwen3-ASR-1.7B-GGUF`（[PR #19441](https://github.com/ggml-org/llama.cpp/pull/19441) 之后进主线）。
-- ⚠️ 但音频编码器要求 **windowed attention（窗口 1–8 秒）**，llama.cpp 在预处理层把音频切成 8 秒块；一次喂 30 秒全注意力会出乱码。**"一次吃 20 分钟"是 Qwen 官方推理框架的能力，不是 llama.cpp 的能力。**
-- 形态同样是 chat completions（mtmd），不是 transcriptions。
+**llama.cpp 的细节**
+
+- 官方支持 `ggml-org/Qwen3-ASR-0.6B/1.7B-GGUF`，**必须** `--mmproj` 加载音频投影，否则模型只当文本模型用。
+- 启动日志出现 `audio input is in experimental stage` 才算音频链路就位。
+- 音频编码器按 **8 秒窗口**预处理（[PR #19441](https://github.com/ggml-org/llama.cpp/pull/19441)）；实测 **81 秒**音频一次喂入正常出文本，没有乱码——但"一次吃 20 分钟"仍是 Qwen 官方推理框架的能力，不要按 20 分钟设计分段。
+- 形态是 chat completions（mtmd），不是 transcriptions。
 
 ### 4.4 结论：升级档走 `ChatAudioAsrProvider`
 
@@ -295,18 +306,63 @@ public sealed record AsrResult(
 
 ## 7. 性能档位
 
-数字是估算口径，**待阶段 E 实测填真数**。
+### 7.1 实测（2026-11-16）
 
-| 机器 | 引擎 | 30 分钟音频耗时 | 定位 |
+**机器**：Intel i7-8700K（6 核 12 线程，2017 年桌面 CPU，无独显）· 32 GB RAM · 纯 CPU（`-ngl 0`）
+**配置**：llama.cpp `b12428` · `ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0` + `mmproj-Q8_0` · `-c 8192` · `n_threads=6`
+**语料**：Windows SAPI 合成（朗读腔，**不是真实会议**，见 §11 R4）
+
+| 音频 | 时长 | 耗时 | RTF | 结果 |
+| --- | --- | --- | --- | --- |
+| 中文 | 27.1 s | 5.48 s（首次） / **1.98 s**（重复同段） | 0.20× / 0.07× | **102 字全部正确** |
+| 英文 | 25.9 s | 5.37 s | 0.21× | 仅大小写/连字符差异 |
+| 日文 | 26.6 s | 6.01 s | 0.23× | 2 处错字（`受け入れ基準`→`受け歴準`、`演習`→`演奏`） |
+| 中英日混说 | 14.6 s | 2.83 s | 0.19× | ⚠️ 日文段崩塌（见 §7.3） |
+| 中文长段 | 81.4 s | 18.26 s | 0.22× | 306 字，2 处错字（`全量`→`全梁`） |
+
+- **进程内存峰值 2.13 GB**（模型 Q8 0.75 GB + mmproj 0.35 GB + KV 8192）。
+- 「首次 vs 重复同一段」的差别是音频嵌入缓存，**真实场景应按 RTF 0.20×** 算（每段音频都是新的）。
+
+**换算**：RTF 0.20× → 30 分钟会议 ≈ **6 分钟**；1 小时 ≈ **12 分钟**。这比 v0.2 的估算（0.6B 15–25 分钟）好一倍。
+
+### 7.2 结论：0.6B 在纯 CPU 上已经够用
+
+这条实测推翻了本文档 v0.1/v0.2 的一个前提——"1.7B 在无独显上要一小时"。实际情况是：
+
+| 机器 | 引擎 | 30 分钟音频 | 定位 |
 | --- | --- | --- | --- |
-| 8 核 CPU，无独显 | whisper turbo q8 | 估 8–15 分钟 | ✅ **默认档，必须可用** |
-| 8 核 CPU，无独显 | whisper small q5 | 估 3–5 分钟 | ✅ 快速档 |
-| 8 核 CPU，无独显 | Qwen3-1.7B | 估 40–90 分钟 | ⚠️ 只在"重解 3 分钟片段"时可接受 |
-| 有独显 | Qwen3-1.7B | 估 5–12 分钟 | ✅ 升级档可用 |
+| 6 核桌面 CPU，无独显 | **Qwen3-ASR-0.6B Q8** | **≈ 6 分钟（实测）** | ✅ **可作为升级档的主力规格** |
+| 同上 | whisper turbo q8 | 估 8–15 分钟（待实测） | ✅ 默认档 |
+| 同上 | whisper small q5 | 估 3–5 分钟（待实测） | ✅ 快速档 |
+| 同上 | Qwen3-ASR-1.7B Q8 | 估 15–25 分钟（0.6B 的 ~2.5 倍） | ⚠️ 待实测 |
+| 有独显 | 任意 | 快 3–10 倍 | ✅ |
 
-**这个翻转最重要的收益**：v0.1 里"1.7B 在无独显上要一小时"是个产品阻断问题（得决定最低配置）；现在它只是"升级档在低配机器上只适合做逐段重解"。**风险被隔离在一个可选功能里了。**
+**产品含义**：升级档不再是"只有独显用户能用"。**默认升级档建议用 0.6B（1.0 GB），1.7B 作为"有独显再下"的可选包**——这和"体积/收益"的直觉一致，也和实测速度一致。
 
-模型体积（Q8 档）：whisper turbo **874 MB** · whisper small **190 MB** · Qwen3-ASR-1.7B GGUF **2.5 GB** · Qwen3-ASR-0.6B GGUF **1.0 GB**。默认只下载 turbo；升级档模型是按需下载，不是必装。
+### 7.4 音频的 token 成本（这条直接决定分段上限）
+
+实测 `prompt_tokens` 与音频时长成正比，约 **13.7 token / 秒**（19.7 s → 270，27.1 s → 374）：
+
+| 音频 | 音频 token | 8K 上下文（`-c 8192`）能否装下 |
+| --- | --- | --- |
+| 30 s | ≈ 410 | ✅ |
+| 60 s | ≈ 820 | ✅ |
+| 5 min | ≈ 4,100 | ✅ |
+| 10 min | ≈ 8,200 | ❌ 超 |
+| 30 min | ≈ 24,700 | ❌ 需 ≥ 32K |
+| 60 min | ≈ 49,000 | ❌ 需 ≥ 64K |
+
+**所以"官方支持一次 20 分钟"在小上下文的本地部署上不成立。** 结论：**按 20–60 秒分段送**（每段 ≈ 270–820 token，安全且失败只丢一小段），这与 §4.4 的分段策略一致，也和 whisper 的 30 秒窗口处理习惯一致。
+
+另外实测 `prompt_ms ≈ 9.2 ms/token`，**音频编码（prompt）占总耗时约 2/3，解码只占 1/3**——所以提速的第一手段是减少重复编码（分段不要重叠太多），不是换更快的解码器。
+
+### 7.5 混说样本为什么不作数
+
+测试用的"混说"是让中文 SAPI 读一段夹着日文的文本——等于要求模型听懂"中国人用中文音系念日文"，这在真实会议里不存在。它暴露的是**合成语料的失真**，不是模型的缺陷。
+
+必须补的真语料（阶段 E）：母语者分别录中/英/日，以及**同一个人在同一次发言里自然切换语言**。这条在 §11 R4 已记为风险。
+
+模型体积（Q8 档）：whisper turbo **874 MB** · whisper small **190 MB** · Qwen3-ASR-1.7B GGUF **2.5 GB** · **Qwen3-ASR-0.6B GGUF 1.0 GB（+ mmproj 0.35 GB）**。默认只下载 turbo；升级档模型是按需下载，不是必装。
 
 ---
 
@@ -367,17 +423,21 @@ public sealed record AsrResult(
 
 **里程碑 B**：一场真实会议能全自动跑完，失败可恢复，混说处有提示。
 
-### 阶段 C · 升级档 spike（1 周，可与 B 并行）**← go / no-go**
+### 阶段 C · 升级档 spike（1 周，可与 B 并行）**← 已部分完成，判定通过**
 
-| # | 任务 | 产物 |
+| # | 任务 | 状态 |
 | --- | --- | --- |
-| C1 | llama.cpp server + `ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0` 跑通 | 60 秒音频经 chat-audio 形态出文本 |
-| C2 | 同法跑通 `Qwen3-ASR-1.7B-GGUF`，并对照 Ollama `frozenlab/qwen3-asr` | 两种托管的 RTF / 内存 / 字错 |
-| C3 | 写 `ChatAudioAsrProvider`：loopback 校验 + 固定提示 + 解析器（剥 `language` 前缀 / `<asr_text>`） | 单测覆盖三种脏输出（带前缀、纯文本、空） |
-| C4 | 段落级重解可行性：只喂 30–60 秒片段 | 单段耗时 ≤ 15 秒（CPU）/ ≤ 3 秒（GPU） |
-| C5 | 填 §7 真数 + 给 go/no-go | 本文档 v1.0 |
+| C1 | llama.cpp server + `ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0` 跑通 | ✅ **2026-11-16 完成**：中文 27 秒整段零错误 |
+| C2 | `Qwen3-ASR-1.7B-GGUF` 与 Ollama 社区包对照 | ⬜ 未做（1.7B 未下载；Ollama 未安装） |
+| C3 | `ChatAudioAsrProvider`：loopback + 固定提示 + 解析器 | ✅ 解析器完成（`asr-spike parse --self-test` 9/9）；provider 未落地 |
+| C4 | 段落级重解可行性：只喂 30–60 秒片段 | ✅ **通过**：27 秒 5.48 s（首次），阈值是 ≤ 15 s |
+| C5 | 填 §7 真数 + 给 go/no-go | ⚠️ 0.6B/CPU 已填；1.7B、GPU、whisper 三行仍是估算 |
 
-**判据**：C4 过（逐段重解在可接受时间内）→ 做 D；不过 → 砍掉升级档，S1/S4 降级为纯提示。
+**判定：go。** C4 在纯 CPU 上以 3 倍余量通过，升级档不再是"只有独显能用"。
+
+剩余待补（可延后，不阻塞 D）：1.7B 的数字、GPU 档、whisper turbo/small 的实测对照（属阶段 E）。
+
+⚠️ **C 阶段新增一条前置检查（本次实测的教训）**：接任何后端前，先跑 `asr-spike probe --model <名> --audio`。它会比对"带音频 / 不带音频"的 `prompt_tokens`，**专门捉住"服务收下了但把音频静默丢弃"这种情况**（LM Studio 就是这样：返回 200 + 空转写，看起来一切正常）。
 
 ### 阶段 D · 升级档生产化（1.5 周，仅当 C 通过）
 

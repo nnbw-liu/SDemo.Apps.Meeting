@@ -64,12 +64,53 @@ public static class Program
         var shape = Shape(o);
         var baseUrl = o.Str("base-url", DefaultBase(shape))!;
 
-        using var client = new ChatAudioClient(TimeSpan.FromSeconds(15));
+        using var client = new ChatAudioClient(TimeSpan.FromSeconds(60));
         Say($"探测 {baseUrl}（{shape}）…");
         var models = await client.ProbeAsync(baseUrl, shape, CancellationToken.None);
 
         Say("可用模型：");
         Console.WriteLine(string.IsNullOrWhiteSpace(models) ? "  （空）" : models);
+
+        var model = o.Str("model");
+        if (model is null)
+        {
+            Say("");
+            Say("（加 --model <名> --audio 可以进一步探测这个服务到底收不收音频）");
+            return 0;
+        }
+
+        if (!o.Flag("audio")) return 0;
+
+        Say("");
+        Say("音频能力探测（4 秒静音，比对 prompt_tokens）…");
+        var silent = ChatAudioClient.SilentWav(4);
+
+        // 用非空 prompt：LM Studio 之类严格服务会拒空 text，让基线也 400 会掩盖真正的结论
+        var probePrompt = "x";
+        var withAudio = await client.TranscribeAsync(baseUrl, shape, model, silent, probePrompt, CancellationToken.None);
+        var textOnly = await client.TranscribeAsync(baseUrl, shape, model, null, probePrompt, CancellationToken.None);
+
+        var delta = (withAudio.PromptTokens ?? 0) - (textOnly.PromptTokens ?? 0);
+        Say($"  纯文本 prompt_tokens : {textOnly.PromptTokens?.ToString() ?? "（服务未返回 usage）"}");
+        Say($"  带音频 prompt_tokens : {withAudio.PromptTokens?.ToString() ?? "（服务未返回 usage）"}");
+        Say($"  音频带来的 token      : {delta}");
+
+        if (withAudio.PromptTokens is null)
+        {
+            Warn("服务没有返回 usage.prompt_tokens，无法判定；请用 run 跑真实音频看输出。");
+            return 1;
+        }
+
+        if (delta <= 10)
+        {
+            Err("音频很可能没有被模型读到（token 没有明显增长）。");
+            Say("  返回的文本：[" + withAudio.Content.Trim() + "]");
+            Say("  已知情况：LM Studio 的 OpenAI 兼容层只接受 text / image_url，会把音频静默丢掉——");
+            Say("  它不会报错，只会返回空转写。换 llama.cpp server（--mmproj 加载音频投影）或 Ollama 社区包。");
+            return 4;
+        }
+
+        Say("✅ 音频已进入模型（token 明显增长），这个后端可以用于转写。");
         return 0;
     }
 
@@ -138,7 +179,8 @@ public static class Program
             Say($"原始 JSON 已写入 {savePath}");
         }
 
-        if (o.Str("out") is { } outFile) AppendMarkdownRow(outFile, model, shape, prepared.Info.Seconds, res.Elapsed, rtf, parsed);
+        if (o.Str("out") is { } outFile) AppendMarkdownRow(outFile, model, shape, prepared.Info.Seconds, res.Elapsed, rtf,
+            parsed.Text.Length, parsed.Warnings);
 
         Cleanup(prepared);
         return parsed.Warnings.Contains("EMPTY_OUTPUT") ? 3 : 0;
@@ -198,7 +240,9 @@ public static class Program
         {
             AppendMarkdownRow(outFile, model, shape, prepared.Info.Seconds, TimeSpan.FromSeconds(median),
                 median / Math.Max(0.001, prepared.Info.Seconds),
-                new ParseResult($"{results.Average(x => x.Chars):F0} 字（均值）", null, Array.Empty<string>()));
+                (int)Math.Round(results.Average(x => x.Chars)),
+                results.SelectMany(x => x.Warnings.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    .Distinct().ToArray());
             Say($"已追加一行到 {outFile}");
         }
 
@@ -236,6 +280,7 @@ public static class Program
 
             用法：
               asr-spike probe   --base-url http://127.0.0.1:8080 [--shape llama]
+              asr-spike probe   --model <模型> --audio        # 探测服务到底收不收音频
               asr-spike run     --input <音频> --model <模型> [选项]
               asr-spike bench   --input <音频> --model <模型> [--repeat 3] [--warmup 1]
               asr-spike parse   --self-test | --text "<原始输出>" | --file <txt>
@@ -320,12 +365,17 @@ public static class Program
     private static ChatAudioShape Shape(Options o) => (o.Str("shape") ?? "llama").ToLowerInvariant() switch
     {
         "ollama" => ChatAudioShape.OllamaImages,
+        "lms" or "lmstudio" => ChatAudioShape.LmsImages,
         "llama" or "llamacpp" or "llama.cpp" or "openai" or "server" => ChatAudioShape.OpenAiInputAudio,
-        var other => throw new ArgumentException($"未知 --shape：{other}（llama | openai | ollama）"),
+        var other => throw new ArgumentException($"未知 --shape：{other}（llama | openai | ollama | lms）"),
     };
 
-    private static string DefaultBase(ChatAudioShape shape) =>
-        shape == ChatAudioShape.OllamaImages ? "http://127.0.0.1:11434" : "http://127.0.0.1:8080";
+    private static string DefaultBase(ChatAudioShape shape) => shape switch
+    {
+        ChatAudioShape.OllamaImages => "http://127.0.0.1:11434",
+        ChatAudioShape.LmsImages => "http://127.0.0.1:1234/v1",
+        _ => "http://127.0.0.1:8080",
+    };
 
     private static string Require(Options o, string key) =>
         o.Str(key) ?? throw new ArgumentException($"缺少 --{key}（试 --help）");
@@ -337,7 +387,7 @@ public static class Program
     }
 
     private static void AppendMarkdownRow(string path, string model, ChatAudioShape shape,
-        double audioSeconds, TimeSpan elapsed, double rtf, ParseResult parsed)
+        double audioSeconds, TimeSpan elapsed, double rtf, int chars, IReadOnlyList<string> warnings)
     {
         var exists = File.Exists(path);
         var sb = new StringBuilder();
@@ -348,8 +398,8 @@ public static class Program
         }
 
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
-            $"| {model} | {shape} | {audioSeconds:F0}s | {elapsed.TotalSeconds:F2}s | {rtf:F2}× | {parsed.Text.Length} | " +
-            $"{(parsed.Warnings.Count == 0 ? "-" : string.Join(",", parsed.Warnings))} | {DateTime.Now:yyyy-MM-dd HH:mm} |"));
+            $"| {model} | {shape} | {audioSeconds:F0}s | {elapsed.TotalSeconds:F2}s | {rtf:F2}× | {chars} | " +
+            $"{(warnings.Count == 0 ? "-" : string.Join(",", warnings))} | {DateTime.Now:yyyy-MM-dd HH:mm} |"));
 
         File.AppendAllText(path, sb.ToString(), Encoding.UTF8);
     }
