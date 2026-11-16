@@ -1,0 +1,143 @@
+@using SDemo.App.Meeting.Core
+@inject IRecorderController Recorder
+@implements IDisposable
+
+<div class="rec-card">
+    <div class="rec-head">
+        <span class="rec-dot @(Snap.IsRecording ? "is-live" : "")"></span>
+        <span class="rec-title">
+            @switch (Snap.Phase)
+            {
+                case RecordingPhase.Idle: <text>录音</text>; break;
+                case RecordingPhase.Recording: <text>正在录音</text>; break;
+                case RecordingPhase.Transcribing: <text>转写中</text>; break;
+                case RecordingPhase.Done: <text>已完成</text>; break;
+                default: <text>出错了</text>; break;
+            }
+        </span>
+        @if (Snap.IsBusy)
+        {
+            <span class="rec-clock">@Snap.Elapsed.ToString(@"hh\:mm\:ss")</span>
+        }
+    </div>
+
+    @if (!Recorder.CanRecord && Snap.Phase == RecordingPhase.Idle)
+    {
+        <p class="rec-hint">
+            本机没有检测到麦克风。检查设备连接，并在
+            <strong>设置 → 隐私和安全性 → 麦克风</strong> 里允许桌面应用访问。
+        </p>
+    }
+    else if (Snap.Phase == RecordingPhase.Idle)
+    {
+        <input class="mtg-input rec-title-input" placeholder="会议标题（留空自动命名）" @bind="_title" />
+        <label class="rec-check">
+            <input type="checkbox" @bind="_includeLoopback" />
+            同时录电脑声音（在线会议用）
+        </label>
+        <div class="rec-actions">
+            <button class="btn-primary" @onclick="StartAsync" disabled="@_busy">开始录音</button>
+        </div>
+    }
+    else if (Snap.Phase == RecordingPhase.Recording)
+    {
+        <div class="rec-actions">
+            <button class="btn-primary" @onclick="StopAsync" disabled="@_busy">停止并转写</button>
+            <button class="btn-ghost" @onclick="CancelAsync" disabled="@_busy">取消</button>
+        </div>
+        <p class="rec-hint">录音结束后自动转写；1 小时会议大约要 12–20 分钟。</p>
+    }
+    else if (Snap.Phase == RecordingPhase.Transcribing)
+    {
+        <div class="rec-progress">
+            <div class="rec-progress-bar" style="width:@((Snap.Progress ?? 0) * 100)%"></div>
+        </div>
+        <p class="rec-hint">@(Snap.Message ?? "转写中…")</p>
+        <div class="rec-actions">
+            <button class="btn-ghost" @onclick="CancelAsync" disabled="@_busy">取消转写</button>
+        </div>
+    }
+    else if (Snap.Phase == RecordingPhase.Done)
+    {
+        <p class="rec-ok">@Snap.Message</p>
+        <div class="rec-actions">
+            <button class="btn-primary" @onclick="OpenAsync">查看结果</button>
+            <button class="btn-ghost" @onclick="Reset">再来一场</button>
+        </div>
+    }
+    else
+    {
+        <p class="rec-error">@Snap.Message</p>
+        <div class="rec-actions">
+            <button class="btn-ghost" @onclick="Reset">重试</button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback<string> OnCompleted { get; set; }
+
+    private RecordingSnapshot Snap = RecordingSnapshot.Idle;
+    private string _title = string.Empty;
+    private bool _includeLoopback = true;
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        Snap = Recorder.Snapshot;
+        Recorder.Changed += OnChanged;
+    }
+
+    private void OnChanged(RecordingSnapshot snapshot) =>
+        _ = InvokeAsync(() =>
+        {
+            Snap = snapshot;
+            StateHasChanged();
+        });
+
+    private async Task StartAsync()
+    {
+        _busy = true;
+        try
+        {
+            Snap = await Recorder.StartAsync(new RecordingOptions(
+                Title: string.IsNullOrWhiteSpace(_title) ? null : _title,
+                IncludeLoopback: _includeLoopback));
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task StopAsync()
+    {
+        _busy = true;
+        try
+        {
+            Snap = await Recorder.StopAsync();
+            if (Snap.Phase == RecordingPhase.Done && Snap.MeetingId is { } id)
+                await OnCompleted.InvokeAsync(id);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        _busy = true;
+        try { Snap = await Recorder.CancelAsync(); }
+        finally { _busy = false; }
+    }
+
+    private async Task OpenAsync()
+    {
+        if (Snap.MeetingId is { } id) await OnCompleted.InvokeAsync(id);
+    }
+
+    private void Reset() => Snap = RecordingSnapshot.Idle;
+
+    public void Dispose() => Recorder.Changed -= OnChanged;
+}

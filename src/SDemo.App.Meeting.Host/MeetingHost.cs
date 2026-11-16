@@ -42,6 +42,28 @@ internal sealed class MeetingHost : IDisposable
     public MeetingMcpServer Mcp => _mcp ??= new MeetingMcpServer(Query, Meetings, Domain, Audit);
     private MeetingMcpServer? _mcp;
 
+    public IRecorderController Recorder => _recorder ??= new RecordingCoordinator(
+        Meetings,
+        Session,
+        new DualTrackCaptureFactory(Path.Combine(MeetingConstants.ResolveDataDir(), MeetingConstants.RecordingsDirName)),
+        CreateWhisperProvider,
+        Path.Combine(MeetingConstants.ResolveDataDir(), MeetingConstants.RecordingsDirName));
+
+    private IRecorderController? _recorder;
+
+    /// <summary>界面录音用的默认引擎：whisper（带内存降档）。模型没就绪时给一句能照做的话。</summary>
+    private IAsrProvider CreateWhisperProvider()
+    {
+        var store = ModelCatalog.Store;
+        if (!store.List().Any(m => m.Status == ModelStatus.Ready))
+        {
+            throw new MeetingException(MeetingErrorCodes.AsrUnavailable,
+                "还没有可用的转写模型。先执行 `meeting models --import <模型文件>`，或安装自带模型的完整包。");
+        }
+
+        return AsrEngineCatalog.CreateWhisperWithFallback(ModelCatalog);
+    }
+
     public McpHttpServer? Server { get; private set; }
 
     public string? McpToken { get; private set; }
@@ -95,6 +117,7 @@ internal sealed class MeetingHost : IDisposable
         services.AddSingleton(Domain);
         services.AddSingleton(Audit);
         services.AddSingleton(new TranscriptEditor(Session));
+        services.AddSingleton(Recorder);
 
         return services.BuildServiceProvider();
     }

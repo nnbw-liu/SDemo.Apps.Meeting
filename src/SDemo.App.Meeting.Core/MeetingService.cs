@@ -35,8 +35,10 @@ public sealed class MeetingService
         return _session.InsertMeeting(meeting);
     }
 
-    public MeetingRecord RequireMeeting(string meetingId) =>
-        _session.GetMeeting(meetingId) ?? throw new MeetingException(MeetingErrorCodes.MeetingNotFound, $"会议不存在：{meetingId}");
+    /// <summary>软删会议（回收站语义）。录音起不来时用它清掉空条目。</summary>
+    public void SoftDeleteMeeting(string meetingId) => _session.SoftDeleteMeeting(meetingId);
+
+    public MeetingRecord RequireMeeting(string meetingId) =>        _session.GetMeeting(meetingId) ?? throw new MeetingException(MeetingErrorCodes.MeetingNotFound, $"会议不存在：{meetingId}");
 
     public IReadOnlyList<MeetingRecord> ListMeetings(int limit = 50) => _session.ListMeetings(limit);
 

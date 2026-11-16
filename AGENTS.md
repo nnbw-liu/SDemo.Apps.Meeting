@@ -13,6 +13,7 @@
 A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x80070005），需在有权限的机器上复验。
 ✍️ **MCP 写面已开**：6 个写工具走 `MeetingDomainService`，成功与失败都落 `mtg_audit`（参数只存 300 字摘要）；`meeting audit` 可查。
 🏷️ **领域模型已建**：`mtg_topic` / `mtg_decision` / `mtg_action`（schema v3，老库就地迁移）；候选转 `intaken` 必须带 `plannerRef`。
+🎙️ **P1 主体完成**：录音卡（开始/计时/停止并转写/取消/进度）+ 双轨开关；状态机在 `Core.RecordingCoordinator`，采集与引擎注入，无麦克风也能测。本机仍被 Windows 麦克风权限拒绝（0x80070005），真机录音待放开。
 🖥️ **主程序 P0 完成**：`SDemo.Meeting.exe` = WPF 外壳 + BlazorWebView + 进程内 MCP（不再有独立 Viewer）；关窗即停服务、runtime 文件转 `stopped`；日志在 `<数据根>\meeting.log`。
 🔌 **MCP 服务已接**：`meeting serve` 起回环 HTTP（`/mcp` + Bearer token、`/v1/health` 免鉴权、`/v1/shutdown` 优雅退出），启动写 `%LOCALAPPDATA%\SDemo\Hub\apps\sdemo.meeting.json`、退出改 `state=stopped`。
 
@@ -20,17 +21,17 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 | --- | --- |
 | `Contracts` | 枚举 / DTO / `IAsrProvider` 能力契约 / 错误码 / UUIDv7 / WAV 头解析 |
 | `Storage` | schema v3：`mtg_meeting` / `mtg_audio_asset` / `mtg_transcript_run` / `mtg_segment` / `mtg_meta` + `mtg_topic` / `mtg_decision` / `mtg_action` + `mtg_audit` |
-| `Core` | `MeetingService` 状态机、`TranscriptionRunner` 编排、`TranscriptQuality` 质检、`MeetingDomainService`、`MeetingAuditLog`（写审计）、`MeetingQuery`、`TranscriptEditor` |
+| `Core` | `MeetingService`、`TranscriptionRunner`、`TranscriptQuality`、`MeetingDomainService`、`MeetingAuditLog`、`MeetingQuery`、`TranscriptEditor`、`RecordingCoordinator`（录音状态机，采集/引擎注入） |
 | `Asr` | `WhisperCppProvider`（Whisper.net 1.8.1）、`ChatAudioProvider`（回环/云端 chat）、`DeepSeekToolsProvider`（`/v1/tools/asr`）、模型目录 |
 | `Audio` | `DualTrackRecorder`（WASAPI 麦克风 + 环回，带启动超时看门狗）、`WavDownmixer` |
 | `Mcp` | `MeetingMcpServer`（JSON-RPC：initialize / ping / tools/list / tools/call）+ 7 个只读 + 6 个写工具（add_topic / update_topic / add_decision / confirm_decision / add_action / mark_action），写工具 risk=medium、approval=once、每次调用落 `mtg_audit` |
-| `Web` | 结果页 Razor 组件 `MeetingResult.razor`（列表 / 段落 / 时间码 / 说话人标注） |
+| `Web` | `MeetingResult.razor`（列表 / 段落 / 时间码 / 说话人标注）+ `RecordPanel.razor`（录音卡） |
 | `Host` | **主程序**：WPF 外壳 + BlazorWebView + 进程内 MCP（`SDemo.Meeting.exe`）；带参时是 CLI：`record` / `import` / `transcribe` / `resume` / `list` / `show` / `models` / `audit` / `doctor` / `tools` / `serve` |
 
 ## 开工先做三件事
 
 1. **阶段 A/B、领域模型、MCP 读写面、主程序 P0 都完成了**。下一步按 [docs/app-plan.md](docs/app-plan.md)：**P1 录音 UI → P2 议题/决议编辑 → P3 KB 投影 → P4 分析链路**。
-2. 主程序已经是单进程形态（`SDemo.Meeting.exe`），**别再拆出第二个 exe**——界面和 MCP 必须同一个库、同一个生命周期。
+2. 主程序已经是单进程形态（`SDemo.Meeting.exe`），**别再拆出第二个 exe**——界面和 MCP 必须同一个库、同一个生命周期。下一步 P1-4（桌面小组件）/ P2（议题与决议编辑）。
 3. `workspaces/meeting.json` 已是 `active`。
 
 模型侧：默认档由安装包自带（`tools/pack-models.ps1`），用户在 `meeting models` 里能看到状态、导入自己的模型、校验与清理。
@@ -97,7 +98,8 @@ src\SDemo.App.Meeting.Host\bin\Release\net10.0-windows10.0.19041.0\SDemo.Meeting
 - **组件依赖要同步 `MeetingHost.BuildServices`**：`MeetingResult` 注入的 `TranscriptEditor` 漏注册时，窗口能起来但页面全黑（组件构造抛异常，WebView 停在空白）。加新组件依赖先查这里。
 - **WebView2 事件钩子放 `Loaded`**：WPF 的 `BlazorWebView.WebView` 在构造期是 null，ctor 里挂 `CoreWebView2InitializationCompleted` 会 NRE。GUI 没有控制台，排错看 `<数据根>\meeting.log`。
 - **GUI 第二个实例静默退出**：不弹框，避免卡住 Hub 的自动拉起；排查时看日志里的「已有实例在运行」。
-- 测试工程是 `net10.0`，**不能引用 `net10.0-windows` 的 Audio 工程**；采集只能靠 CLI 人工验。
+- 测试工程是 `net10.0`，**不能引用 `net10.0-windows` 的 Audio 工程**；采集要验就走 `IAudioCaptureFactory` 假实现（见 `RecordingTests`），真设备只能人工点一次。
+- **录音失败别留空会议**：`CreateMeeting` 在 `capture.Start` 之前，设备起不来时要把刚建的会议软删，否则列表里会多一条"未转写"的幽灵记录。
 
 ## 不要读
 

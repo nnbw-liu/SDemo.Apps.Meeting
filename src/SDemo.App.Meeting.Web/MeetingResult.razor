@@ -5,7 +5,12 @@
     <aside class="mtg-side">
         <div class="mtg-side-head">
             <span class="eyebrow">sdemo.meeting</span>
-            <h1>会议</h1>
+            <div class="mtg-side-title">
+                <h1>会议</h1>
+                <button class="btn-record" @onclick="() => _showRecord = !_showRecord">
+                    @(_showRecord ? "收起" : "● 录音")
+                </button>
+            </div>
         </div>
 
         @if (_items.Count == 0)
@@ -39,6 +44,11 @@
     </aside>
 
     <section class="mtg-main">
+        @if (_showRecord)
+        {
+            <RecordPanel OnCompleted="OnRecordCompleted" />
+        }
+
         @if (_detail is null)
         {
             <div class="mtg-placeholder">左侧选一场会议看转写结果</div>
@@ -147,12 +157,16 @@
     private string _filter = string.Empty;
     private int? _activeOrdinal;
     private string? _flash;
+    private bool _showRecord;
 
     protected override void OnInitialized()
     {
         _items = Query.List();
         _speakers = Query.KnownSpeakers();
         if (_items.Count > 0) Select(_items[0].Meeting.Id);
+
+        // 首次打开（还没有会议）直接把录音卡摆在最上面，省得用户找入口
+        _showRecord = _items.Count == 0;
     }
 
     private void Select(string meetingId)
@@ -220,6 +234,18 @@
         _items = Query.List();
         _speakers = Query.KnownSpeakers();
         if (_selectedId is { } id) _detail = Query.GetDetail(id);
+    }
+
+    /// <summary>录音/转写完成后：刷新列表并选中刚录的那场。</summary>
+    private void OnRecordCompleted(string meetingId)
+    {
+        _items = Query.List();
+        _speakers = Query.KnownSpeakers();
+        _selectedId = meetingId;
+        _detail = Query.GetDetail(meetingId);
+        _activeOrdinal = null;
+        _filter = string.Empty;
+        _flash = "这场是刚录的，转写已完成";
     }
 
     private IEnumerable<TranscriptSegmentRecord> Filtered(TranscriptSlice slice) =>
