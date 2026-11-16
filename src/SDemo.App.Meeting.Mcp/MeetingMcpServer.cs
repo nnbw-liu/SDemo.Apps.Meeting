@@ -19,12 +19,18 @@ public sealed class MeetingMcpServer
     private readonly MeetingQuery _query;
     private readonly MeetingService _meetings;
     private readonly MeetingDomainService _domain;
+    private readonly MeetingAuditLog _audit;
 
-    public MeetingMcpServer(MeetingQuery query, MeetingService meetings, MeetingDomainService? domain = null)
+    public MeetingMcpServer(
+        MeetingQuery query,
+        MeetingService meetings,
+        MeetingDomainService? domain = null,
+        MeetingAuditLog? audit = null)
     {
         _query = query;
         _meetings = meetings;
         _domain = domain ?? new MeetingDomainService(query.Session);
+        _audit = audit ?? new MeetingAuditLog(query.Session);
     }
 
     /// <summary>处理一条 JSON-RPC 消息；返回空字符串表示"只有通知、无需响应"。</summary>
@@ -138,6 +144,9 @@ public sealed class MeetingMcpServer
                    ?? throw new MeetingException(MeetingErrorCodes.InvalidArgument, "tools/call 缺少 name");
         var args = parameters?["arguments"] as JsonObject ?? new JsonObject();
 
+        if (MeetingToolCatalog.WriteToolNames.Contains(name))
+            return CallWriteTool(name, args);
+
         var payload = name switch
         {
             "meeting_list" => ListMeetings(args),
@@ -150,19 +159,186 @@ public sealed class MeetingMcpServer
             _ => throw new MeetingException(MeetingErrorCodes.InvalidArgument, $"未知工具：{name}"),
         };
 
-        return new JsonObject
-        {
-            ["content"] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["type"] = "text",
-                    ["text"] = payload.ToJsonString(new JsonSerializerOptions { WriteIndented = false }),
-                },
-            },
-            ["isError"] = false,
-        };
+        return Envelope(payload);
     }
+
+    /// <summary>写工具：成功与失败都落审计（失败带错误码），参数只存截断摘要。</summary>
+    private JsonObject CallWriteTool(string name, JsonObject args)
+    {
+        var entityType = name switch
+        {
+            "meeting_add_topic" or "meeting_update_topic" => "topic",
+            "meeting_add_decision" or "meeting_confirm_decision" => "decision",
+            _ => "action",
+        };
+
+        try
+        {
+            var (payload, action, entityId, meetingId) = name switch
+            {
+                "meeting_add_topic" => AddTopic(args),
+                "meeting_update_topic" => UpdateTopic(args),
+                "meeting_add_decision" => AddDecision(args),
+                "meeting_confirm_decision" => ConfirmDecision(args),
+                "meeting_add_action" => AddAction(args),
+                "meeting_mark_action" => MarkAction(args),
+                _ => throw new MeetingException(MeetingErrorCodes.InvalidArgument, $"未知写工具：{name}"),
+            };
+
+            _audit.Write(name, action, entityType, entityId, meetingId, args.ToJsonString());
+            return Envelope(payload);
+        }
+        catch (MeetingException ex)
+        {
+            var entityId = GetString(args, "actionId") ?? GetString(args, "decisionId") ?? GetString(args, "topicId");
+            _audit.WriteFailure(name, "error", entityType, $"{ex.Code}: {ex.Message}",
+                entityId: entityId, meetingId: ResolveMeetingId(args), argsJson: args.ToJsonString());
+            throw;
+        }
+    }
+
+    /// <summary>审计要能按会议查，所以失败时也要尽量把会议 id 解出来（args 里可能只有实体 id）。</summary>
+    private string? ResolveMeetingId(JsonObject args)
+    {
+        if (GetString(args, "id") is { } meetingId) return meetingId;
+
+        var session = _query.Session;
+        if (GetString(args, "actionId") is { } actionId) return session.GetAction(actionId)?.MeetingId;
+        if (GetString(args, "decisionId") is { } decisionId) return session.GetDecision(decisionId)?.MeetingId;
+        if (GetString(args, "topicId") is { } topicId) return session.GetTopic(topicId)?.MeetingId;
+
+        return null;
+    }
+
+    private static JsonObject Envelope(JsonObject payload) => new()
+    {
+        ["content"] = new JsonArray
+        {
+            new JsonObject
+            {
+                ["type"] = "text",
+                ["text"] = payload.ToJsonString(new JsonSerializerOptions { WriteIndented = false }),
+            },
+        },
+        ["isError"] = false,
+    };
+
+    // ── 写工具实现 ──────────────────────────────────────────────────────
+
+    private (JsonObject Payload, string Action, string EntityId, string MeetingId) AddTopic(JsonObject args)
+    {
+        var meetingId = RequireString(args, "id");
+        var title = RequireString(args, "title");
+
+        var topic = _domain.AddTopic(meetingId, title, GetString(args, "summary"), GetStringArray(args, "refs"));
+
+        return (TopicJson(topic), "create", topic.Id, meetingId);
+    }
+
+    private (JsonObject Payload, string Action, string EntityId, string MeetingId) UpdateTopic(JsonObject args)
+    {
+        var topicId = RequireString(args, "topicId");
+
+        var topic = _domain.UpdateTopic(
+            topicId,
+            GetString(args, "title"),
+            GetString(args, "summary"),
+            args.ContainsKey("refs") ? GetStringArray(args, "refs") : null);
+
+        return (TopicJson(topic), "update", topic.Id, topic.MeetingId);
+    }
+
+    private (JsonObject Payload, string Action, string EntityId, string MeetingId) AddDecision(JsonObject args)
+    {
+        var meetingId = RequireString(args, "id");
+        var text = RequireString(args, "text");
+
+        var decision = _domain.AddDecision(
+            meetingId,
+            text,
+            GetString(args, "topicId"),
+            GetString(args, "rationale"),
+            GetString(args, "owner"),
+            args["anchorMs"] is JsonValue v && v.TryGetValue<int>(out var anchor) ? anchor : null);
+
+        return (DecisionJson(decision), "create", decision.Id, meetingId);
+    }
+
+    private (JsonObject Payload, string Action, string EntityId, string MeetingId) ConfirmDecision(JsonObject args)
+    {
+        var decisionId = RequireString(args, "decisionId");
+
+        var decision = _domain.ConfirmDecision(decisionId);
+
+        return (DecisionJson(decision), "confirm", decision.Id, decision.MeetingId);
+    }
+
+    private (JsonObject Payload, string Action, string EntityId, string MeetingId) AddAction(JsonObject args)
+    {
+        var meetingId = RequireString(args, "id");
+        var text = RequireString(args, "text");
+
+        var action = _domain.AddAction(
+            meetingId,
+            text,
+            GetString(args, "topicId"),
+            GetString(args, "owner"),
+            GetDateTime(args, "dueAt"),
+            args["anchorMs"] is JsonValue v && v.TryGetValue<int>(out var anchor) ? anchor : null);
+
+        return (ActionJson(action), "create", action.Id, meetingId);
+    }
+
+    private (JsonObject Payload, string Action, string EntityId, string MeetingId) MarkAction(JsonObject args)
+    {
+        var actionId = RequireString(args, "actionId");
+        var statusText = RequireString(args, "status");
+
+        if (!Enum.TryParse<ActionStatus>(statusText, ignoreCase: true, out var status))
+            throw new MeetingException(MeetingErrorCodes.InvalidArgument,
+                $"status 只能是 candidate / intaken / rejected：{statusText}");
+
+        var updated = _domain.MarkAction(actionId, status, GetString(args, "plannerRef"));
+
+        return (ActionJson(updated), "mark", updated.Id, updated.MeetingId);
+    }
+
+    // ── 实体 JSON ───────────────────────────────────────────────────────
+
+    private static JsonObject TopicJson(TopicRecord topic) => new()
+    {
+        ["id"] = topic.Id,
+        ["meetingId"] = topic.MeetingId,
+        ["ordinal"] = topic.Ordinal,
+        ["title"] = topic.Title,
+        ["summary"] = topic.Summary,
+        ["refs"] = new JsonArray(topic.Refs.Select(r => (JsonNode)r).ToArray()),
+    };
+
+    private static JsonObject DecisionJson(DecisionRecord decision) => new()
+    {
+        ["id"] = decision.Id,
+        ["meetingId"] = decision.MeetingId,
+        ["topicId"] = decision.TopicId,
+        ["text"] = decision.Text,
+        ["rationale"] = decision.Rationale,
+        ["owner"] = decision.Owner,
+        ["status"] = decision.Status.ToString().ToLowerInvariant(),
+        ["anchorMs"] = decision.AnchorMs,
+    };
+
+    private static JsonObject ActionJson(ActionRecord action) => new()
+    {
+        ["id"] = action.Id,
+        ["meetingId"] = action.MeetingId,
+        ["topicId"] = action.TopicId,
+        ["text"] = action.Text,
+        ["owner"] = action.Owner,
+        ["dueAt"] = action.DueAt?.ToString("O"),
+        ["status"] = action.Status.ToString().ToLowerInvariant(),
+        ["plannerRef"] = action.PlannerRef,
+        ["anchorMs"] = action.AnchorMs,
+    };
 
     private JsonObject ListMeetings(JsonObject args)
     {
@@ -417,6 +593,11 @@ public sealed class MeetingMcpServer
     private static string? GetString(JsonObject args, string name) =>
         args[name] is JsonValue value && value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text)
             ? text
+            : null;
+
+    private static IReadOnlyList<string>? GetStringArray(JsonObject args, string name) =>
+        args[name] is JsonArray array
+            ? array.Select(n => n?.GetValue<string>()).Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!).ToArray()
             : null;
 
     private static int GetInt(JsonObject args, string name, int fallback) =>

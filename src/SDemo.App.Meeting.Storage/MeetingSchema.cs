@@ -7,7 +7,7 @@ namespace SDemo.App.Meeting.Storage;
 /// </summary>
 public static class MeetingSchema
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public static void Migrate(SqliteConnection conn)
     {
@@ -140,6 +140,32 @@ public static class MeetingSchema
             tx.Commit();
             SetUserVersion(conn, 2);
             version = 2;
+        }
+
+        if (version < 3)
+        {
+            using var tx = conn.BeginTransaction();
+            Exec(conn, """
+                CREATE TABLE IF NOT EXISTS mtg_audit (
+                    id           TEXT PRIMARY KEY,
+                    at           TEXT NOT NULL,
+                    actor        TEXT NOT NULL,
+                    tool         TEXT NOT NULL,
+                    action       TEXT NOT NULL,
+                    entity_type  TEXT NOT NULL,
+                    entity_id    TEXT,
+                    meeting_id   TEXT,
+                    args_summary TEXT,
+                    outcome      TEXT NOT NULL,
+                    error        TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ix_audit_meeting ON mtg_audit(meeting_id, at);
+                CREATE INDEX IF NOT EXISTS ix_audit_at ON mtg_audit(at);
+                """, tx);
+
+            tx.Commit();
+            SetUserVersion(conn, 3);
+            version = 3;
         }
 
         if (version < CurrentVersion)

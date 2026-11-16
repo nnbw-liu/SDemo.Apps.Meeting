@@ -133,5 +133,99 @@ public static class MeetingToolCatalog
             """,
             ToolRisk.Low,
             ReadOnly: true),
+
+        // ── 写工具（中风险，一次确认）────────────────────────────────────
+        new McpToolDefinition(
+            "meeting_add_topic",
+            "给会议加一个议题。refs 只接受 sdemo.* URI。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "id":{"type":"string","description":"会议 id"},
+              "title":{"type":"string","maxLength":200},
+              "summary":{"type":"string","maxLength":2000},
+              "refs":{"type":"array","items":{"type":"string"},"maxItems":16}
+            },"required":["id","title"]}
+            """,
+            ToolRisk.Medium,
+            ReadOnly: false,
+            Idempotent: false),
+
+        new McpToolDefinition(
+            "meeting_update_topic",
+            "改议题的标题 / 摘要 / 引用。只传要改的字段。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "topicId":{"type":"string"},
+              "title":{"type":"string","maxLength":200},
+              "summary":{"type":"string","maxLength":2000},
+              "refs":{"type":"array","items":{"type":"string"},"maxItems":16}
+            },"required":["topicId"]}
+            """,
+            ToolRisk.Medium,
+            ReadOnly: false),
+
+        new McpToolDefinition(
+            "meeting_add_decision",
+            "加一条决议，初始状态 proposed；确认要用 meeting_confirm_decision。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "id":{"type":"string","description":"会议 id"},
+              "text":{"type":"string","maxLength":2000},
+              "topicId":{"type":"string"},
+              "rationale":{"type":"string","maxLength":2000},
+              "owner":{"type":"string","maxLength":64},
+              "anchorMs":{"type":"integer","minimum":0,"description":"引自转写的哪一刻"}
+            },"required":["id","text"]}
+            """,
+            ToolRisk.Medium,
+            ReadOnly: false,
+            Idempotent: false),
+
+        new McpToolDefinition(
+            "meeting_confirm_decision",
+            "确认决议（proposed → confirmed）。幂等：已确认时直接返回。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "decisionId":{"type":"string"}
+            },"required":["decisionId"]}
+            """,
+            ToolRisk.Medium,
+            ReadOnly: false),
+
+        new McpToolDefinition(
+            "meeting_add_action",
+            "加一条待办候选（candidate）。**不创建待办**，转待办要经 Agent 调 Planner。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "id":{"type":"string","description":"会议 id"},
+              "text":{"type":"string","maxLength":2000},
+              "topicId":{"type":"string"},
+              "owner":{"type":"string","maxLength":64},
+              "dueAt":{"type":"string","format":"date-time"},
+              "anchorMs":{"type":"integer","minimum":0}
+            },"required":["id","text"]}
+            """,
+            ToolRisk.Medium,
+            ReadOnly: false,
+            Idempotent: false),
+
+        new McpToolDefinition(
+            "meeting_mark_action",
+            "改候选状态。转 intaken 必须带 plannerRef（sdemo.planner/...），否则拒绝。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "actionId":{"type":"string"},
+              "status":{"type":"string","enum":["candidate","intaken","rejected"]},
+              "plannerRef":{"type":"string","description":"sdemo.planner/todo/..."}
+            },"required":["actionId","status"]}
+            """,
+            ToolRisk.Medium,
+            ReadOnly: false),
     };
+
+    /// <summary>写工具名单：MCP 层据此决定要不要落审计。</summary>
+    public static IReadOnlySet<string> WriteToolNames { get; } = Tools
+        .Where(t => !t.ReadOnly)
+        .Select(t => t.Name)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
 }

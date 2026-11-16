@@ -44,6 +44,7 @@ public static class Program
                 "models" => Models(app, o),
                 "doctor" => Doctor(app),
                 "tools" => Tools(),
+                "audit" => Audit(app, o),
                 "serve" => await ServeAsync(app, o),
                 _ => Unknown(cmd),
             };
@@ -410,6 +411,28 @@ public static class Program
         return 0;
     }
 
+    private static int Audit(MeetingApp app, Options o)
+    {
+        var meetingId = o.Str("meeting");
+        var records = new MeetingAuditLog(app.Session).List(meetingId, o.Int("limit", 50));
+
+        if (records.Count == 0)
+        {
+            Console.WriteLine(meetingId is null ? "还没有审计记录" : $"{meetingId} 还没有审计记录");
+            return 0;
+        }
+
+        foreach (var r in records)
+        {
+            var mark = r.Outcome == "ok" ? "✓" : "✗";
+            Console.WriteLine(
+                $"{r.At.ToLocalTime():MM-dd HH:mm:ss} {mark} {r.Actor,-5} {r.Tool,-24} {r.Action,-7} " +
+                $"{r.EntityType}/{r.EntityId?[..8] ?? "-"} {r.Error ?? ""}");
+        }
+
+        return 0;
+    }
+
     // ── serve ───────────────────────────────────────────────────────────
 
     /// <summary>起回环 HTTP：/mcp 给 DesktopAgent 用，/v1/health 给宿主探活。</summary>
@@ -477,6 +500,7 @@ public static class Program
           meeting list        [--limit 20]
           meeting show        <id>
           meeting models      [--import <文件> [--id <packId>] [--overwrite]] [--verify <id>] [--remove <id>]
+          meeting audit       [--meeting <id>] [--limit 50]
           meeting serve       [--port 0] [--token <hex>] [--show-token] [--no-runtime-file]
           meeting doctor
           meeting tools

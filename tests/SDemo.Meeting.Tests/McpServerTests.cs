@@ -57,19 +57,123 @@ public sealed class McpServerTests : IDisposable
     }
 
     [Fact]
-    public void tools_list_带风险元数据且全部只读()
+    public void tools_list_读工具低风险_写工具中风险且需确认()
     {
         var response = Call("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""");
         var tools = response!["result"]!["tools"]!.AsArray();
 
-        Assert.Equal(7, tools.Count);
-        foreach (var tool in tools)
+        Assert.Equal(13, tools.Count);
+
+        var reads = tools.Where(t => t!["annotations"]!["readOnlyHint"]!.GetValue<bool>()).ToArray();
+        var writes = tools.Where(t => !t!["annotations"]!["readOnlyHint"]!.GetValue<bool>()).ToArray();
+
+        Assert.Equal(7, reads.Length);
+        Assert.Equal(6, writes.Length);
+
+        foreach (var tool in reads)
         {
-            Assert.True(tool!["annotations"]!["readOnlyHint"]!.GetValue<bool>());
-            Assert.Equal("low", tool["_meta"]!["sdemo/risk"]!.GetValue<string>());
+            Assert.Equal("low", tool!["_meta"]!["sdemo/risk"]!.GetValue<string>());
             Assert.Equal("none", tool["_meta"]!["sdemo/approval"]!.GetValue<string>());
             Assert.False(tool["_meta"]!["sdemo/writes"]!.GetValue<bool>());
         }
+
+        foreach (var tool in writes)
+        {
+            Assert.Equal("medium", tool["_meta"]!["sdemo/risk"]!.GetValue<string>());
+            Assert.Equal("once", tool["_meta"]!["sdemo/approval"]!.GetValue<string>());
+            Assert.True(tool["_meta"]!["sdemo/writes"]!.GetValue<bool>());
+        }
+    }
+
+    [Fact]
+    public void 加议题会落一条审计()
+    {
+        var payload = PayloadOf(Call(ToolCall(20, "meeting_add_topic", new JsonObject
+        {
+            ["id"] = _meetingId,
+            ["title"] = "客户 A 需求变更",
+            ["refs"] = new JsonArray("sdemo.kb/doc/01H9@v7"),
+        })));
+
+        Assert.Equal("客户 A 需求变更", payload["title"]!.GetValue<string>());
+
+        var audit = Assert.Single(_db.Session.ListAudit(_meetingId));
+        Assert.Equal("meeting_add_topic", audit.Tool);
+        Assert.Equal("create", audit.Action);
+        Assert.Equal("topic", audit.EntityType);
+        Assert.Equal("agent", audit.Actor.ToString().ToLowerInvariant());
+        Assert.Equal("ok", audit.Outcome);
+        Assert.Equal(payload["id"]!.GetValue<string>(), audit.EntityId);
+    }
+
+    [Fact]
+    public void 确认决议幂等且每次都有审计()
+    {
+        var domain = new MeetingDomainService(_db.Session);
+        var decision = domain.AddDecision(_meetingId, "灰度两周");
+
+        var first = PayloadOf(Call(ToolCall(21, "meeting_confirm_decision",
+            new JsonObject { ["decisionId"] = decision.Id })));
+        Assert.Equal("confirmed", first["status"]!.GetValue<string>());
+
+        var second = PayloadOf(Call(ToolCall(22, "meeting_confirm_decision",
+            new JsonObject { ["decisionId"] = decision.Id })));
+        Assert.Equal("confirmed", second["status"]!.GetValue<string>());
+
+        Assert.Equal(2, _db.Session.ListAudit(_meetingId).Count(a => a.Tool == "meeting_confirm_decision"));
+    }
+
+    [Fact]
+    public void 写工具失败也落审计_并带错误码()
+    {
+        var domain = new MeetingDomainService(_db.Session);
+        var action = domain.AddAction(_meetingId, "写验收标准");
+
+        var response = Call(ToolCall(23, "meeting_mark_action", new JsonObject
+        {
+            ["actionId"] = action.Id,
+            ["status"] = "intaken",   // 缺 plannerRef
+        }));
+
+        Assert.Equal(-32000, response!["error"]!["code"]!.GetValue<int>());
+
+        var audit = Assert.Single(_db.Session.ListAudit(_meetingId));
+        Assert.Equal("error", audit.Outcome);
+        Assert.Contains("MTG_INVALID_TRANSITION", audit.Error);
+    }
+
+    [Fact]
+    public void 审计只存截断摘要_不存正文全文()
+    {
+        var longText = new string('长', 1200);
+
+        Call(ToolCall(24, "meeting_add_decision", new JsonObject
+        {
+            ["id"] = _meetingId,
+            ["text"] = longText,
+        }));
+
+        var audit = Assert.Single(_db.Session.ListAudit(_meetingId));
+        Assert.NotNull(audit.ArgsSummary);
+        Assert.True(audit.ArgsSummary!.Length <= MeetingAuditLog.MaxSummaryChars + 1,
+            $"摘要过长：{audit.ArgsSummary.Length}");
+        Assert.DoesNotContain(longText, audit.ArgsSummary);
+    }
+
+    [Fact]
+    public void 写候选后能在_read_工具里看到()
+    {
+        Call(ToolCall(25, "meeting_add_action", new JsonObject
+        {
+            ["id"] = _meetingId,
+            ["text"] = "补回滚演练记录",
+            ["owner"] = "王五",
+        }));
+
+        var payload = PayloadOf(Call(ToolCall(26, "meeting_actions",
+            new JsonObject { ["id"] = _meetingId })));
+
+        Assert.Equal(1, payload["candidates"]!.GetValue<int>());
     }
 
     [Fact]
