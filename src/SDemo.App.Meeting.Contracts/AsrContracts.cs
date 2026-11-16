@@ -115,3 +115,9 @@ public sealed record AsrAvailability(bool Available, string? Reason, string? Det
     public static AsrAvailability Ok() => new(true, null, null);
     public static AsrAvailability No(string reason, string? detail = null) => new(false, reason, detail);
 }
+
+/// <summary>引擎可以附带一条"运行说明"（例如降档、切 CPU），由编排层写进 warnings。</summary>
+public interface IFallbackNote
+{
+    string? Note { get; }
+}

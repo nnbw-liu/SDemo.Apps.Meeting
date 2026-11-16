@@ -151,14 +151,10 @@ public static class Program
             Console.WriteLine($"使用音频：{preferred.Source}  {preferred.Path}");
         }
 
-        using var provider = AsrEngineCatalog.Create(
-            engineId,
-            app.ModelCatalog,
-            o.Str("base-url"),
-            o.Str("model"),
-            o.Str("whisper-model"),
-            o.Str("api-key") ?? Environment.GetEnvironmentVariable(AsrEngineCatalog.ApiKeyEnvVar),
-            o.Flag("allow-remote"));
+        using var provider = CreateProvider(app, o, engineId);
+
+        if (provider is IFallbackNote { Note: { Length: > 0 } note })
+            Console.Error.WriteLine($"[warn] {note}");
 
         if (provider is ChatAudioProvider chat && !chat.IsLocal)
         {
@@ -218,14 +214,7 @@ public static class Program
         }
 
         var engineId = o.Str("engine") ?? run.Engine;
-        using var provider = AsrEngineCatalog.Create(
-            engineId,
-            app.ModelCatalog,
-            o.Str("base-url"),
-            o.Str("model"),
-            o.Str("whisper-model"),
-            o.Str("api-key") ?? Environment.GetEnvironmentVariable(AsrEngineCatalog.ApiKeyEnvVar),
-            o.Flag("allow-remote"));
+        using var provider = CreateProvider(app, o, engineId);
 
         Console.WriteLine($"续转 run {runId}：已完成 {app.Meetings.CountSegments(runId)} 段");
 
@@ -240,8 +229,22 @@ public static class Program
         return 0;
     }
 
-    private static TranscriptionOptions BuildOptions(Options o, string? language) =>
-        new(
+    /// <summary>按引擎造 provider；whisper 走"带降档"的工厂（B4）。</summary>
+    private static IAsrProvider CreateProvider(MeetingApp app, Options o, string engineId)
+    {
+        var apiKey = o.Str("api-key") ?? Environment.GetEnvironmentVariable(AsrEngineCatalog.ApiKeyEnvVar);
+
+        var isWhisper = engineId.Equals(AsrEngineCatalog.Whisper, StringComparison.OrdinalIgnoreCase)
+                        || engineId.Equals("whisper", StringComparison.OrdinalIgnoreCase)
+                        || engineId.Equals("whispercpp", StringComparison.OrdinalIgnoreCase);
+
+        return isWhisper
+            ? AsrEngineCatalog.CreateWhisperWithFallback(app.ModelCatalog, o.Str("whisper-model"))
+            : AsrEngineCatalog.Create(engineId, app.ModelCatalog, o.Str("base-url"), o.Str("model"),
+                o.Str("whisper-model"), apiKey, o.Flag("allow-remote"));
+    }
+
+    private static TranscriptionOptions BuildOptions(Options o, string? language) =>        new(
             Language: language,
             Hotwords: ParseList(o.Str("hotwords")),
             MaxSegmentMs: o.Int("max-segment", 60_000),
@@ -357,6 +360,19 @@ public static class Program
         Console.WriteLine($"数据目录 : {MeetingConstants.ResolveDataDir()}");
         Console.WriteLine($"数据库   : {app.Database.Path}");
         Console.WriteLine($"录音设备 : {(DualTrackRecorder.HasCaptureDevice() ? "有" : "无")}");
+
+        var memory = SystemMemory.Read();
+        Console.WriteLine($"内存     : 可用 {memory.AvailableGb:F1} GB / 共 {memory.TotalGb:F1} GB");
+
+        var decision = AsrTierSelector.Choose(
+            app.ModelCatalog.Store,
+            ModelPacks.WhisperTurboQ8,
+            memory,
+            isUsable: d => app.ModelCatalog.Store.Get(d.Id)?.Status == ModelStatus.Ready);
+
+        Console.WriteLine($"档位决策 : {decision.Pack.Id}{(decision.IsFallback ? "（降档）" : "")}");
+        if (decision.Reason is { Length: > 0 } reason) Console.WriteLine($"           {reason}");
+
         Console.WriteLine();
 
         foreach (var engineId in AsrEngineCatalog.EngineIds)
@@ -364,6 +380,12 @@ public static class Program
             if (engineId == AsrEngineCatalog.ChatAudio)
             {
                 Console.WriteLine($"引擎 {engineId,-14} : 需要 --base-url/--model（回环端点），跳过探测");
+                continue;
+            }
+
+            if (engineId == AsrEngineCatalog.DeepSeekTools)
+            {
+                Console.WriteLine($"引擎 {engineId,-14} : 需要 API Key（SDEMO_ASR_API_KEY），跳过探测");
                 continue;
             }
 

@@ -97,4 +97,7 @@ public enum AsrWarningCode
 
     /// <summary>重复短语。</summary>
     RepeatSuspect,
+
+    /// <summary>引擎降档（内存不足时从默认档落到低配档）——不是转写质量问题，是运行说明。</summary>
+    EngineFallback,
 }

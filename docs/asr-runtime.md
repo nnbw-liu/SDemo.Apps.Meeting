@@ -444,7 +444,7 @@ public sealed record AsrResult(
 | B1 | VAD 分段 + 跨窗去重合并 | ✅ **2026-11-16 完成**：能量型 VAD（无模型、20 ms 帧、双阈值迟滞）+ **窗口打包**；81 秒真实音频 → 2 个窗口（0 s / 57 s），不再是 27 个句子级碎片 |
 | B2 | 进度、取消、续转、中断恢复 | ✅ 完成：增量落库（取消/崩溃保留已完成段）、`resume --run` 从第 N 段续、启动时 `running → interrupted`；测试覆盖取消与续转 |
 | B3 | 模型分发：下载 / sha256 / 占用显示 / 清理 | ✅ **2026-11-16 完成**：权重不进 git，两条来源——安装包自带（`tools/pack-models.ps1`）+ 用户导入（`meeting models --import`）；`models.json` 记 sha256；`--verify` 重算、`--remove` 清理、列表显示占用与状态 |
-| B4 | 低配档 `small` + 自动回落 | ⬜ 未做（目录里已有 small 条目，但没做自动回落） |
+| B4 | 低配档 `small` + 自动回落 | ✅ **2026-11-16 完成**：`AsrTierSelector` 事前按可用内存选档（模型体积 + 512 MB 余量），`FallbackAsrProvider` 事中捕获 OOM 再降一次；降档说明以 `EngineFallback` 告警落到段上、`show` 里可见 |
 | B5 | 术语表（hotwords / initial_prompt） | ✅ 已接：CLI `--hotwords "SDemo,Qwen3"` → whisper `WithPrompt`，参数落 `params_json` |
 | B6 | 语言 hint + 质检信号 S1–S4 | ✅ 已接：`--lang` 固定语言；`TranscriptQuality` 产出 warnings 并按时间回写到 `mtg_segment.warnings`；`show` 里以 ⚠ 显示 |
 | B7 | 转写结果页（段落 + 时间码 + 跳转 + 说话人） | ⬜ 未做（需要 WPF 界面，CLI 只能 `show` 打印） |
@@ -461,7 +461,16 @@ public sealed record AsrResult(
 
 `models.json` 与运行期 manifest 同格式，所以安装包解到数据目录后**直接就是"已就绪"**。实测：真实 874 MB 模型的 sha256 `317eb69c…` 与内置常量一致，`--verify` 3.6 秒算完。
 
-**里程碑 B**：一场真实会议能全自动跑完，失败可恢复，混说处有提示。—— B1/B2/B3/B5/B6 已就位；B4（small 自动回落）、B7（结果页）未做。
+**里程碑 B**：一场真实会议能全自动跑完，失败可恢复，混说处有提示。—— B1/B2/B3/B4/B5/B6 已就位；B7（结果页）未做。
+
+**B4 的两道闸**
+
+| 时机 | 谁 | 判据 | 用户看到什么 |
+| --- | --- | --- | --- |
+| 事前 | `AsrTierSelector.Choose` | 可用物理内存 < 模型体积 + 512 MB | `doctor` 显示"档位决策：small（降档）"；转写前打印一条 warn |
+| 事中 | `FallbackAsrProvider` | 引擎抛 OOM / `bad_alloc` / `failed to allocate` | 自动换成 small 重试一次；结果首段带 `EngineFallback` 告警，`show` 里显示 ⚠ |
+
+边界：**非内存错误（模型损坏、音频读不了）不降档**——换档救不了，只会把真错误盖住；低配档也没装时明确报错，不静默用更差的档。
 
 ### 阶段 C · 升级档 spike（1 周，可与 B 并行）**← 已部分完成，判定通过**
 

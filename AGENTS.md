@@ -9,7 +9,7 @@
 ## 现状（2026-11-16）
 
 ✅ **阶段 A 已落地**：8 个工程 + `SDemo.Meeting.slnf`，`import → transcribe → list/show` 端到端跑通。
-🟡 **阶段 B 完成 5/7**：VAD 分段（含窗口打包）、增量落库/取消/续转、模型库（打包 + 导入 + 校验 + 清理）、hotwords、语言 hint + 质检告警。
+🟢 **阶段 B 完成 6/7**：VAD 分段（含窗口打包）、增量落库/取消/续转、模型库（打包 + 导入 + 校验 + 清理）、低配档自动回落、hotwords、语言 hint + 质检告警。只剩 B7（结果页，需要 WPF）。
 A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x80070005），需在有权限的机器上复验。
 
 | 层 | 状态 |
@@ -24,7 +24,7 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 
 ## 开工先做三件事
 
-1. ASR 运行时 v0.4（[asr-runtime.md](docs/asr-runtime.md)）：阶段 A 完成；阶段 B 的 B1/B2/B3/B5/B6 已就位；**下一步 B4（`small` 低配档自动回落）、B7（结果页，需要 WPF）**。
+1. ASR 运行时 v0.4（[asr-runtime.md](docs/asr-runtime.md)）：阶段 A 完成；阶段 B 的 B1/B2/B3/B4/B5/B6 已就位；**只剩 B7 结果页（要开 WPF 组合根）**。
 2. 建 WPF 组合根与 MCP server（当前 Host 是 CLI，界面和工具面还没接）。
 3. `workspaces/meeting.json` 已是 `active`。
 

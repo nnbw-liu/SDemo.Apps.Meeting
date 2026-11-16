@@ -42,4 +42,35 @@ public static class AsrEngineCatalog
 
     /// <summary>从环境变量取云端端点的 Key（命令行参数优先）。</summary>
     public const string ApiKeyEnvVar = "SDEMO_ASR_API_KEY";
+
+    /// <summary>
+    /// whisper 引擎带降档：内存装不下默认档就事前降到 low 档；
+    /// 装得下也包一层，运行期 OOM 再降（见 <see cref="FallbackAsrProvider"/>）。
+    /// </summary>
+    public static IAsrProvider CreateWhisperWithFallback(
+        MeetingModelCatalog catalog,
+        string? preferredPackId = null,
+        MemorySnapshot? memory = null)
+    {
+        var store = catalog.Store;
+        var preferred = preferredPackId ?? ModelPacks.WhisperTurboQ8;
+        var snapshot = memory ?? SystemMemory.Read();
+
+        var decision = AsrTierSelector.Choose(
+            store,
+            preferred,
+            snapshot,
+            isUsable: definition => store.Get(definition.Id)?.Status == ModelStatus.Ready);
+
+        if (decision.IsFallback)
+        {
+            // 事前就已经降到低配档：直接用它，但仍然保留说明
+            var compact = new WhisperCppProvider(catalog, decision.Pack.Id);
+            return new FallbackAsrProvider(compact, () => new WhisperCppProvider(catalog, ModelPacks.WhisperSmallQ5),
+                decision.Reason, alreadyFallenBack: true);
+        }
+
+        var primary = new WhisperCppProvider(catalog, decision.Pack.Id);
+        return new FallbackAsrProvider(primary, () => new WhisperCppProvider(catalog, ModelPacks.WhisperSmallQ5));
+    }
 }

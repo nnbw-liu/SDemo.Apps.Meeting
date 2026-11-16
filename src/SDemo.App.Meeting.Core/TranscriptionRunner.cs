@@ -119,7 +119,12 @@ public sealed class TranscriptionRunner
 
             if (options.AnalyzeQuality)
             {
-                var warnings = TranscriptQuality.Analyze(collected, options.Language);
+                var warnings = TranscriptQuality.Analyze(collected, options.Language).ToList();
+
+                // 降档说明要能让用户看见（UI 上就是一条提示，不是转写质量问题）
+                if (provider is IFallbackNote { Note: { Length: > 0 } note })
+                    warnings.Add(new AsrWarning(AsrWarningCode.EngineFallback, 0, note));
+
                 _meetings.ApplyWarnings(run.Id, warnings);
             }
 
