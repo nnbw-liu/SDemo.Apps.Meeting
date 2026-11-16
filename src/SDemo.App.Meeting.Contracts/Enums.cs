@@ -45,6 +45,21 @@ public enum SpeakerSource
     Auto,
 }
 
+/// <summary>决议状态：只有 confirmed 才进正式纪要（meeting-design §3）。</summary>
+public enum DecisionStatus
+{
+    Proposed,
+    Confirmed,
+}
+
+/// <summary>待办候选三态。**候选永远不是待办**：只有 Agent 在 Planner 建完待办后才转 intaken。</summary>
+public enum ActionStatus
+{
+    Candidate,
+    Intaken,
+    Rejected,
+}
+
 /// <summary>时间戳精度：决定块 anchor 的粒度（设计见 asr-runtime §5.2）。</summary>
 public enum TimestampPrecision
 {

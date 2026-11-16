@@ -13,6 +13,10 @@ public static class MeetingErrorCodes
     public const string RunNotTerminal = "MTG_RUN_NOT_TERMINAL";
     public const string InvalidArgument = "MTG_INVALID_ARGUMENT";
     public const string NoAudioDevice = "MTG_NO_AUDIO_DEVICE";
+    public const string TopicNotFound = "MTG_TOPIC_NOT_FOUND";
+    public const string DecisionNotFound = "MTG_DECISION_NOT_FOUND";
+    public const string ActionNotFound = "MTG_ACTION_NOT_FOUND";
+    public const string InvalidTransition = "MTG_INVALID_TRANSITION";
 }
 
 public sealed class MeetingException : Exception

@@ -98,5 +98,40 @@ public static class MeetingToolCatalog
             """,
             ToolRisk.Low,
             ReadOnly: true),
+
+        new McpToolDefinition(
+            "meeting_topics",
+            "取会议议题（按序号）。每个议题带跨项目引用 refs 与决议/候选计数。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "id":{"type":"string","description":"会议 id"}
+            },"required":["id"]}
+            """,
+            ToolRisk.Low,
+            ReadOnly: true),
+
+        new McpToolDefinition(
+            "meeting_decisions",
+            "取会议决议。默认只返回 confirmed（正式纪要口径），status=all 才含 proposed。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "id":{"type":"string","description":"会议 id"},
+              "status":{"type":"string","enum":["confirmed","proposed","all"],"default":"confirmed"}
+            },"required":["id"]}
+            """,
+            ToolRisk.Low,
+            ReadOnly: true),
+
+        new McpToolDefinition(
+            "meeting_actions",
+            "取待办候选。candidate 表示尚未安排；intaken 带上 plannerRef。**候选不是待办**。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "id":{"type":"string","description":"会议 id"},
+              "status":{"type":"string","enum":["candidate","intaken","rejected","all"],"default":"all"}
+            },"required":["id"]}
+            """,
+            ToolRisk.Low,
+            ReadOnly: true),
     };
 }

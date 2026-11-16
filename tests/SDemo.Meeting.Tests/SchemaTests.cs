@@ -10,7 +10,7 @@ public sealed class SchemaTests : IDisposable
     public void Dispose() => _db.Dispose();
 
     [Fact]
-    public void 建库后应有五张表且版本为1()
+    public void 建库后应有全部表且版本为当前版本()
     {
         using var conn = _db.Database.Connect();
 
@@ -20,7 +20,10 @@ public sealed class SchemaTests : IDisposable
         Assert.Contains("mtg_transcript_run", tables);
         Assert.Contains("mtg_segment", tables);
         Assert.Contains("mtg_meta", tables);
-        Assert.Equal(1, MeetingSchema.GetUserVersion(conn));
+        Assert.Contains("mtg_topic", tables);
+        Assert.Contains("mtg_decision", tables);
+        Assert.Contains("mtg_action", tables);
+        Assert.Equal(MeetingSchema.CurrentVersion, MeetingSchema.GetUserVersion(conn));
     }
 
     [Fact]

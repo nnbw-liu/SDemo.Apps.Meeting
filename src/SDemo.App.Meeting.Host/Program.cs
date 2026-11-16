@@ -419,7 +419,10 @@ public static class Program
                     ?? Environment.GetEnvironmentVariable("SDEMO_APP_TOKEN")
                     ?? Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
 
-        var mcp = new MeetingMcpServer(new MeetingQuery(app.Session), app.Meetings);
+        var mcp = new MeetingMcpServer(
+            new MeetingQuery(app.Session),
+            app.Meetings,
+            new MeetingDomainService(app.Session));
         using var server = new McpHttpServer(
             token,
             MeetingConstants.AppId,

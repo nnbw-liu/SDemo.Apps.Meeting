@@ -18,11 +18,13 @@ public sealed class MeetingMcpServer
 
     private readonly MeetingQuery _query;
     private readonly MeetingService _meetings;
+    private readonly MeetingDomainService _domain;
 
-    public MeetingMcpServer(MeetingQuery query, MeetingService meetings)
+    public MeetingMcpServer(MeetingQuery query, MeetingService meetings, MeetingDomainService? domain = null)
     {
         _query = query;
         _meetings = meetings;
+        _domain = domain ?? new MeetingDomainService(query.Session);
     }
 
     /// <summary>处理一条 JSON-RPC 消息；返回空字符串表示"只有通知、无需响应"。</summary>
@@ -142,6 +144,9 @@ public sealed class MeetingMcpServer
             "meeting_get" => GetMeeting(args),
             "meeting_transcript" => GetTranscript(args),
             "meeting_runs" => ListRuns(args),
+            "meeting_topics" => ListTopics(args),
+            "meeting_decisions" => ListDecisions(args),
+            "meeting_actions" => ListActions(args),
             _ => throw new MeetingException(MeetingErrorCodes.InvalidArgument, $"未知工具：{name}"),
         };
 
@@ -210,6 +215,7 @@ public sealed class MeetingMcpServer
             ["status"] = detail.Meeting.Status.ToString().ToLowerInvariant(),
             ["uri"] = detail.Meeting.Uri,
             ["audio"] = audio,
+            ["domain"] = DomainCounts(detail.Meeting.Id),
             ["currentRun"] = detail.Current is { } slice
                 ? new JsonObject
                 {
@@ -220,6 +226,19 @@ public sealed class MeetingMcpServer
                     ["segmentCount"] = slice.Segments.Count,
                 }
                 : null,
+        };
+    }
+
+    private JsonObject DomainCounts(string meetingId)
+    {
+        var domain = _domain.Get(meetingId);
+        return new JsonObject
+        {
+            ["topics"] = domain.Topics.Count,
+            ["decisions"] = domain.Decisions.Count,
+            ["confirmedDecisions"] = domain.ConfirmedDecisions,
+            ["actions"] = domain.Actions.Count,
+            ["candidateActions"] = domain.CandidateActions,
         };
     }
 
@@ -269,8 +288,105 @@ public sealed class MeetingMcpServer
         };
     }
 
-    private JsonObject ListRuns(JsonObject args)
+    private JsonObject ListTopics(JsonObject args)
     {
+        var id = RequireString(args, "id");
+        var domain = _domain.Get(id);
+
+        var topics = new JsonArray();
+        foreach (var topic in domain.Topics)
+        {
+            var decisions = domain.Decisions.Count(d => d.TopicId == topic.Id);
+            var actions = domain.Actions.Count(a => a.TopicId == topic.Id);
+
+            topics.Add(new JsonObject
+            {
+                ["id"] = topic.Id,
+                ["ordinal"] = topic.Ordinal,
+                ["title"] = topic.Title,
+                ["summary"] = topic.Summary,
+                ["refs"] = new JsonArray(topic.Refs.Select(r => (JsonNode)r).ToArray()),
+                ["decisionCount"] = decisions,
+                ["actionCount"] = actions,
+            });
+        }
+
+        return new JsonObject { ["id"] = id, ["topics"] = topics };
+    }
+
+    private JsonObject ListDecisions(JsonObject args)
+    {
+        var id = RequireString(args, "id");
+        var domain = _domain.Get(id);
+        var status = GetString(args, "status") ?? "confirmed";
+
+        var filtered = status.Equals("all", StringComparison.OrdinalIgnoreCase)
+            ? domain.Decisions
+            : domain.Decisions.Where(d => d.Status.ToString().Equals(status, StringComparison.OrdinalIgnoreCase)).ToArray();
+
+        var array = new JsonArray();
+        foreach (var decision in filtered)
+        {
+            array.Add(new JsonObject
+            {
+                ["id"] = decision.Id,
+                ["topicId"] = decision.TopicId,
+                ["text"] = decision.Text,
+                ["rationale"] = decision.Rationale,
+                ["owner"] = decision.Owner,
+                ["status"] = decision.Status.ToString().ToLowerInvariant(),
+                ["anchorMs"] = decision.AnchorMs,
+            });
+        }
+
+        return new JsonObject
+        {
+            ["id"] = id,
+            ["status"] = status,
+            ["total"] = domain.Decisions.Count,
+            ["returned"] = array.Count,
+            ["decisions"] = array,
+        };
+    }
+
+    private JsonObject ListActions(JsonObject args)
+    {
+        var id = RequireString(args, "id");
+        var domain = _domain.Get(id);
+        var status = GetString(args, "status") ?? "all";
+
+        var filtered = status.Equals("all", StringComparison.OrdinalIgnoreCase)
+            ? domain.Actions
+            : domain.Actions.Where(a => a.Status.ToString().Equals(status, StringComparison.OrdinalIgnoreCase)).ToArray();
+
+        var array = new JsonArray();
+        foreach (var action in filtered)
+        {
+            array.Add(new JsonObject
+            {
+                ["id"] = action.Id,
+                ["topicId"] = action.TopicId,
+                ["text"] = action.Text,
+                ["owner"] = action.Owner,
+                ["dueAt"] = action.DueAt?.ToString("O"),
+                ["status"] = action.Status.ToString().ToLowerInvariant(),
+                ["plannerRef"] = action.PlannerRef,
+                ["anchorMs"] = action.AnchorMs,
+            });
+        }
+
+        return new JsonObject
+        {
+            ["id"] = id,
+            ["status"] = status,
+            ["total"] = domain.Actions.Count,
+            ["candidates"] = domain.CandidateActions,
+            ["returned"] = array.Count,
+            ["actions"] = array,
+        };
+    }
+
+    private JsonObject ListRuns(JsonObject args)    {
         var id = RequireString(args, "id");
         var detail = _query.GetDetail(id)
                      ?? throw new MeetingException(MeetingErrorCodes.MeetingNotFound, $"会议不存在：{id}");

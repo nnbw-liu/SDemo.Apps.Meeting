@@ -7,7 +7,7 @@ namespace SDemo.App.Meeting.Storage;
 /// 表读写。这里是唯一允许出现 SQL 的地方；领域规则在 Core。
 /// 所有枚举以 PascalCase 文本落库，读回时忽略大小写解析。
 /// </summary>
-public sealed class MeetingSession
+public sealed partial class MeetingSession
 {
     private readonly MeetingDatabase _db;
 

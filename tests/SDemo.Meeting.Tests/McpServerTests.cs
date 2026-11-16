@@ -62,7 +62,7 @@ public sealed class McpServerTests : IDisposable
         var response = Call("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""");
         var tools = response!["result"]!["tools"]!.AsArray();
 
-        Assert.Equal(4, tools.Count);
+        Assert.Equal(7, tools.Count);
         foreach (var tool in tools)
         {
             Assert.True(tool!["annotations"]!["readOnlyHint"]!.GetValue<bool>());
@@ -125,8 +125,67 @@ public sealed class McpServerTests : IDisposable
     }
 
     [Fact]
-    public void meeting_runs_标出当前_run()
+    public void meeting_topics_带_refs_与决议候选计数()
     {
+        var domain = new MeetingDomainService(_db.Session);
+        var topic = domain.AddTopic(_meetingId, "客户 A 需求变更", refs: new[] { "sdemo.kb/doc/01H9@v7" });
+        domain.AddDecision(_meetingId, "先灰度", topic.Id);
+        domain.AddAction(_meetingId, "补演练记录", topic.Id);
+
+        var payload = PayloadOf(Call(ToolCall(10, "meeting_topics", new JsonObject { ["id"] = _meetingId })));
+
+        var first = Assert.Single(payload["topics"]!.AsArray())!;
+        Assert.Equal("客户 A 需求变更", first["title"]!.GetValue<string>());
+        Assert.Equal(1, first["decisionCount"]!.GetValue<int>());
+        Assert.Equal(1, first["actionCount"]!.GetValue<int>());
+        Assert.Equal("sdemo.kb/doc/01H9@v7", first["refs"]![0]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void meeting_decisions_默认只返回_confirmed()
+    {
+        var domain = new MeetingDomainService(_db.Session);
+        var proposed = domain.AddDecision(_meetingId, "待定决议");
+        var confirmed = domain.AddDecision(_meetingId, "已确认决议");
+        domain.ConfirmDecision(confirmed.Id);
+
+        var defaultPayload = PayloadOf(Call(ToolCall(11, "meeting_decisions", new JsonObject { ["id"] = _meetingId })));
+        var onlyConfirmed = Assert.Single(defaultPayload["decisions"]!.AsArray())!;
+        Assert.Equal(confirmed.Id, onlyConfirmed["id"]!.GetValue<string>());
+        Assert.Equal(2, defaultPayload["total"]!.GetValue<int>());
+
+        var allPayload = PayloadOf(Call(ToolCall(12, "meeting_decisions",
+            new JsonObject { ["id"] = _meetingId, ["status"] = "all" })));
+        Assert.Equal(2, allPayload["returned"]!.GetValue<int>());
+
+        // proposed 的那条确实在库里，只是默认被过滤
+        Assert.Equal(DecisionStatus.Proposed, domain.Get(_meetingId).Decisions.Single(d => d.Id == proposed.Id).Status);
+    }
+
+    [Fact]
+    public void meeting_actions_区分_candidate_与_intaken()
+    {
+        var domain = new MeetingDomainService(_db.Session);
+        var pending = domain.AddAction(_meetingId, "补回滚演练记录", owner: "王五");
+        var taken = domain.AddAction(_meetingId, "写验收标准");
+        domain.MarkAction(taken.Id, ActionStatus.Intaken, "sdemo.planner/todo/01HB");
+
+        var payload = PayloadOf(Call(ToolCall(13, "meeting_actions", new JsonObject { ["id"] = _meetingId })));
+
+        Assert.Equal(2, payload["total"]!.GetValue<int>());
+        Assert.Equal(1, payload["candidates"]!.GetValue<int>());
+
+        var candidate = payload["actions"]!.AsArray().Single(a => a!["id"]!.GetValue<string>() == pending.Id)!;
+        Assert.Equal("candidate", candidate["status"]!.GetValue<string>());
+        Assert.Null(candidate["plannerRef"]);
+
+        var intaken = payload["actions"]!.AsArray().Single(a => a!["id"]!.GetValue<string>() == taken.Id)!;
+        Assert.Equal("intaken", intaken["status"]!.GetValue<string>());
+        Assert.Equal("sdemo.planner/todo/01HB", intaken["plannerRef"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void meeting_runs_标出当前_run()    {
         var response = Call(ToolCall(7, "meeting_runs", new JsonObject { ["id"] = _meetingId }));
 
         var run = Assert.Single(PayloadOf(response)["runs"]!.AsArray())!;

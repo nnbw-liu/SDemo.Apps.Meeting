@@ -7,7 +7,7 @@ namespace SDemo.App.Meeting.Storage;
 /// </summary>
 public static class MeetingSchema
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     public static void Migrate(SqliteConnection conn)
     {
@@ -85,6 +85,61 @@ public static class MeetingSchema
             tx.Commit();
             SetUserVersion(conn, 1);
             version = 1;
+        }
+
+        if (version < 2)
+        {
+            using var tx = conn.BeginTransaction();
+            Exec(conn, """
+                CREATE TABLE IF NOT EXISTS mtg_topic (
+                    id          TEXT PRIMARY KEY,
+                    meeting_id  TEXT NOT NULL REFERENCES mtg_meeting(id),
+                    ordinal     INTEGER NOT NULL,
+                    title       TEXT NOT NULL,
+                    summary     TEXT,
+                    refs_json   TEXT,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL,
+                    deleted_at  TEXT
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_topic_meeting_ordinal
+                    ON mtg_topic(meeting_id, ordinal) WHERE deleted_at IS NULL;
+
+                CREATE TABLE IF NOT EXISTS mtg_decision (
+                    id          TEXT PRIMARY KEY,
+                    meeting_id  TEXT NOT NULL REFERENCES mtg_meeting(id),
+                    topic_id    TEXT REFERENCES mtg_topic(id),
+                    text        TEXT NOT NULL,
+                    rationale   TEXT,
+                    owner       TEXT,
+                    status      TEXT NOT NULL,
+                    anchor_ms   INTEGER,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL,
+                    deleted_at  TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ix_decision_meeting ON mtg_decision(meeting_id, status);
+
+                CREATE TABLE IF NOT EXISTS mtg_action (
+                    id           TEXT PRIMARY KEY,
+                    meeting_id   TEXT NOT NULL REFERENCES mtg_meeting(id),
+                    topic_id     TEXT REFERENCES mtg_topic(id),
+                    text         TEXT NOT NULL,
+                    owner        TEXT,
+                    due_at       TEXT,
+                    status       TEXT NOT NULL,
+                    planner_ref  TEXT,
+                    anchor_ms    INTEGER,
+                    created_at   TEXT NOT NULL,
+                    updated_at   TEXT NOT NULL,
+                    deleted_at   TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ix_action_meeting ON mtg_action(meeting_id, status);
+                """, tx);
+
+            tx.Commit();
+            SetUserVersion(conn, 2);
+            version = 2;
         }
 
         if (version < CurrentVersion)

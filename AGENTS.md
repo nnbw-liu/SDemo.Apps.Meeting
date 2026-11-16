@@ -11,23 +11,24 @@
 ✅ **阶段 A 已落地**：8 个工程 + `SDemo.Meeting.slnf`，`import → transcribe → list/show` 端到端跑通。
 ✅ **阶段 B 全部完成（B1–B7）**：VAD 分段（含窗口打包）、增量落库/取消/续转、模型库（打包 + 导入 + 校验 + 清理）、低配档自动回落、hotwords、语言 hint + 质检告警、转写结果页（WPF + BlazorWebView）。
 A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x80070005），需在有权限的机器上复验。
+🏷️ **领域模型已建**：`mtg_topic` / `mtg_decision` / `mtg_action`（schema v2，老库就地迁移）；候选转 `intaken` 必须带 `plannerRef`。
 🔌 **MCP 服务已接**：`meeting serve` 起回环 HTTP（`/mcp` + Bearer token、`/v1/health` 免鉴权、`/v1/shutdown` 优雅退出），启动写 `%LOCALAPPDATA%\SDemo\Hub\apps\sdemo.meeting.json`、退出改 `state=stopped`。
 
 | 层 | 状态 |
 | --- | --- |
 | `Contracts` | 枚举 / DTO / `IAsrProvider` 能力契约 / 错误码 / UUIDv7 / WAV 头解析 |
-| `Storage` | `mtg_meeting` / `mtg_audio_asset` / `mtg_transcript_run` / `mtg_segment` / `mtg_meta`，schema v1 |
-| `Core` | `MeetingService` 状态机、`TranscriptionRunner` 编排、`TranscriptQuality` 质检信号 |
+| `Storage` | schema v2：`mtg_meeting` / `mtg_audio_asset` / `mtg_transcript_run` / `mtg_segment` / `mtg_meta` + `mtg_topic` / `mtg_decision` / `mtg_action` |
+| `Core` | `MeetingService` 状态机、`TranscriptionRunner` 编排、`TranscriptQuality` 质检信号、`MeetingDomainService`（议题/决议/候选）、`MeetingQuery`、`TranscriptEditor` |
 | `Asr` | `WhisperCppProvider`（Whisper.net 1.8.1）、`ChatAudioProvider`（回环/云端 chat）、`DeepSeekToolsProvider`（`/v1/tools/asr`）、模型目录 |
 | `Audio` | `DualTrackRecorder`（WASAPI 麦克风 + 环回，带启动超时看门狗）、`WavDownmixer` |
-| `Mcp` | `MeetingMcpServer`（JSON-RPC：initialize / ping / tools/list / tools/call）+ 4 个只读工具（meeting_list / meeting_get / meeting_transcript / meeting_runs），带风险元数据 |
+| `Mcp` | `MeetingMcpServer`（JSON-RPC：initialize / ping / tools/list / tools/call）+ 7 个只读工具（list / get / transcript / runs / topics / decisions / actions），带风险元数据 |
 | `Web` | 结果页 Razor 组件 `MeetingResult.razor`（列表 / 段落 / 时间码 / 说话人标注） |
 | `Viewer` | WPF + BlazorWebView 外壳（进程内组件，不起 HTTP）；`SDemo.Meeting.Viewer.exe` |
 | `Host` | CLI：`record` / `import` / `transcribe` / `resume` / `list` / `show` / `models` / `doctor` / `tools` |
 
 ## 开工先做三件事
 
-1. **阶段 A / B 都完成了**（[asr-runtime.md](docs/asr-runtime.md)）；MCP 服务（4 个只读工具）已接。下一步：**写工具 + 审计**（标说话人、建会议、触发转写）、议题/决议/候选三类表（`mtg_topic` / `mtg_decision` / `mtg_action`）、会议分析交给 Agent 的批处理链路。
+1. **阶段 A / B + 领域模型 + MCP 读面都完成了**。下一步：**MCP 写工具 + 审计**（标说话人、建/改议题、确认决议、回写 plannerRef）、会议分析交给 Agent 的批处理链路、KB 投影（`/v1/ingest`）。
 2. Host 仍是 CLI；结果页是独立的 `SDemo.Meeting.Viewer.exe`（WPF + BlazorWebView）。
 3. `workspaces/meeting.json` 已是 `active`。
 
@@ -89,6 +90,7 @@ src\SDemo.App.Meeting.Host\bin\Release\net10.0-windows10.0.19041.0\SDemo.Meeting
 - **分段引擎按 `NeedsVad` 分流**：whisper 自带长音频能力（整段一次），chat-audio / deepseek-tools 必须切段。判断依据是能力声明，不是引擎名。
 - **`HttpListener` 对空 POST 回 411**：`POST /v1/shutdown` 这类无 body 的请求必须带 `Content-Length: 0`（curl 用 `-d ''`），否则在进到处理函数之前就被拒。
 - **MCP 工具面 v1 只读**：写工具（标说话人、建会议、触发转写）要等审计与审批落地再加，别提前开。
+- **候选转 `intaken` 必须带 `plannerRef`**（`sdemo.planner/...`）：没有引用说明"安排"没发生，`MeetingDomainService` 会直接拒绝。
 - 测试工程是 `net10.0`，**不能引用 `net10.0-windows` 的 Audio 工程**；采集只能靠 CLI 人工验。
 
 ## 不要读

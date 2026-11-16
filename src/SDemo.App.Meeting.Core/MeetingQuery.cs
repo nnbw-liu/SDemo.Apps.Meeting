@@ -24,6 +24,8 @@ public sealed class MeetingQuery
 
     public MeetingQuery(Storage.MeetingSession session) => _session = session;
 
+    public Storage.MeetingSession Session => _session;
+
     public IReadOnlyList<MeetingListItem> List(int limit = 100)
     {
         var meetings = _session.ListMeetings(limit);
