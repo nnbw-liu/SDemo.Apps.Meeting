@@ -17,6 +17,7 @@ public static class MeetingErrorCodes
     public const string DecisionNotFound = "MTG_DECISION_NOT_FOUND";
     public const string ActionNotFound = "MTG_ACTION_NOT_FOUND";
     public const string InvalidTransition = "MTG_INVALID_TRANSITION";
+    public const string KbUnavailable = "MTG_KB_UNAVAILABLE";
 }
 
 public sealed class MeetingException : Exception

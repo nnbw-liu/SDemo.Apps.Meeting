@@ -65,6 +65,7 @@ html, body {
 
 .pill { padding: 1px 6px; border: 1px solid var(--line); border-radius: 20px; font-size: 10px; color: var(--muted); }
 .pill-ready, .pill-archived { color: var(--green); border-color: rgba(74, 222, 128, 0.3); }
+.pill-failed { color: var(--red); border-color: rgba(255, 113, 133, .4); }
 .pill-transcribing, .pill-recording { color: var(--accent); border-color: rgba(109, 141, 255, 0.35); }
 
 .mtg-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }

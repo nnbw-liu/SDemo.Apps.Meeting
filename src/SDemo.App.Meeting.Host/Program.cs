@@ -60,6 +60,11 @@ public static class Program
             var port = host.StartMcp(port: options.Int("port", 0));
             Log($"MCP 已在进程内启动：127.0.0.1:{port}");
 
+            // KB 上次没开的话，这里补投一次；不等结果，失败只记状态
+            _ = host.RetryPendingProjectionsAsync().ContinueWith(
+                t => Log($"补投结束：{t.Exception?.GetBaseException().Message ?? "ok"}"),
+                TaskScheduler.Default);
+
             var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
             var window = new MainWindow(services, Path.Combine(MeetingConstants.ResolveDataDir(), "webview2"));
             app.MainWindow = window;

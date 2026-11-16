@@ -7,7 +7,7 @@ namespace SDemo.App.Meeting.Storage;
 /// </summary>
 public static class MeetingSchema
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     public static void Migrate(SqliteConnection conn)
     {
@@ -166,6 +166,29 @@ public static class MeetingSchema
             tx.Commit();
             SetUserVersion(conn, 3);
             version = 3;
+        }
+
+        if (version < 4)
+        {
+            using var tx = conn.BeginTransaction();
+            Exec(conn, """
+                CREATE TABLE IF NOT EXISTS mtg_projection (
+                    meeting_id         TEXT PRIMARY KEY REFERENCES mtg_meeting(id),
+                    status             TEXT NOT NULL,
+                    doc_id             TEXT,
+                    doc_version        INTEGER,
+                    block_count        INTEGER NOT NULL DEFAULT 0,
+                    include_transcript INTEGER NOT NULL DEFAULT 0,
+                    attempts           INTEGER NOT NULL DEFAULT 0,
+                    last_error         TEXT,
+                    idempotency_key    TEXT NOT NULL,
+                    updated_at         TEXT NOT NULL
+                );
+                """, tx);
+
+            tx.Commit();
+            SetUserVersion(conn, 4);
+            version = 4;
         }
 
         if (version < CurrentVersion)

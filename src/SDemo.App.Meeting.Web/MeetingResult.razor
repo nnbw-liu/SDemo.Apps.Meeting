@@ -2,6 +2,7 @@
 @inject TranscriptEditor Editor
 @inject MeetingDomainService DomainService
 @inject MeetingAuditLog AuditLog
+@inject KbProjectionService Projection
 
 <div class="mtg-app">
     <aside class="mtg-side">
@@ -74,6 +75,10 @@
                     </div>
                 </div>
                 <div class="mtg-head-actions">
+                    <span class="pill @KbPillClass">@KbStatusText</span>
+                    <button class="btn-ghost" @onclick="ArchiveToKbAsync" disabled="@_archiving">
+                        @(_projection?.DocId is null ? "归档到知识库" : "重新归档")
+                    </button>
                     <span class="pill pill-@_detail.Meeting.Status.ToString().ToLowerInvariant()">@_detail.Meeting.Status</span>
                     @if (_detail.Current is { } slice)
                     {
@@ -180,6 +185,8 @@
     private MeetingDetail? _detail;
     private MeetingDomain? _domain;
     private IReadOnlyList<AuditRecord> _audit = Array.Empty<AuditRecord>();
+    private ProjectionRecord? _projection;
+    private bool _archiving;
     private string? _topicId;
     private string? _selectedId;
     private string _filter = string.Empty;
@@ -203,6 +210,7 @@
         _detail = Query.GetDetail(meetingId);
         _domain = _detail is null ? null : DomainService.Get(meetingId);
         _audit = AuditLog.List(meetingId, 5);
+        _projection = Projection.Get(meetingId);
         _topicId = null;
         _activeOrdinal = null;
         _filter = string.Empty;
@@ -307,7 +315,56 @@
         _detail = Query.GetDetail(id);
         _domain = _detail is null ? null : DomainService.Get(id);
         _audit = AuditLog.List(id, 5);
+        _projection = Projection.Get(id);
     }
+
+    /// <summary>归档 = 先投影（含转写，这是用户显式动作），再把同一份 doc 升到 durable。</summary>
+    private async Task ArchiveToKbAsync()
+    {
+        if (_detail is null) return;
+
+        _archiving = true;
+        try
+        {
+            var projected = await Projection.ProjectAsync(_detail.Meeting.Id, includeTranscript: true);
+
+            if (projected.Status != ProjectionStatus.Done)
+            {
+                _flash = $"归档失败：{projected.LastError}";
+            }
+            else
+            {
+                var promoted = await Projection.PromoteAsync(_detail.Meeting.Id);
+                _flash = promoted.Status == ProjectionStatus.Done
+                    ? "已归档到知识库（结论 + 转写）"
+                    : $"已写入知识库，但升格失败：{promoted.LastError}";
+            }
+        }
+        catch (MeetingException ex)
+        {
+            _flash = $"归档失败：{ex.Message}";
+        }
+        finally
+        {
+            _archiving = false;
+            Reload();
+        }
+    }
+
+    private string KbStatusText => _projection?.Status switch
+    {
+        ProjectionStatus.Done => "已归档 · KB",
+        ProjectionStatus.Pending => "投影中…",
+        ProjectionStatus.Failed => "归档失败",
+        _ => "未归档",
+    };
+
+    private string KbPillClass => _projection?.Status switch
+    {
+        ProjectionStatus.Done => "pill-ready",
+        ProjectionStatus.Failed => "pill-failed",
+        _ => string.Empty,
+    };
 
     /// <summary>录音/转写完成后：刷新列表并选中刚录的那场。</summary>
     private void OnRecordCompleted(string meetingId)

@@ -103,6 +103,34 @@ internal sealed class MeetingHost : IDisposable
         return Server.Port;
     }
 
+    public KbProjectionService Projection => _projection ??= new KbProjectionService(
+        Session,
+        Domain,
+        () => KbConnection.TryRead() is { } connection ? new HttpKbTransport(connection) : null);
+
+    private KbProjectionService? _projection;
+
+    /// <summary>
+    /// 启动时补投一次没成功的投影（KB 可能上次没开）。只补次数不多的，避免每次开都撞同一个错误。
+    /// </summary>
+    public async Task RetryPendingProjectionsAsync(int maxAttempts = 5, CancellationToken ct = default)
+    {
+        if (KbConnection.TryRead() is null) return;
+
+        foreach (var pending in Session.ListPendingProjections())
+        {
+            if (pending.Attempts >= maxAttempts) continue;
+            try
+            {
+                await Projection.ProjectAsync(pending.MeetingId, pending.IncludeTranscript, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Program.Log($"补投投影失败：{pending.MeetingId} {ex.Message}");
+            }
+        }
+    }
+
     /// <summary>给 BlazorWebView 用的容器：组件要的服务都在这里。</summary>
     public ServiceProvider BuildServices()
     {
@@ -117,6 +145,7 @@ internal sealed class MeetingHost : IDisposable
         services.AddSingleton(Domain);
         services.AddSingleton(Audit);
         services.AddSingleton(new TranscriptEditor(Session));
+        services.AddSingleton(Projection);
         services.AddSingleton(Recorder);
 
         return services.BuildServiceProvider();

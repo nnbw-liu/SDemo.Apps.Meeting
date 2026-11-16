@@ -142,14 +142,38 @@ SDemo.Meeting.exe
 | 组件异常导致整页空白 | 没有错误边界 | 根组件换成 `MainShell.razor`（`<ErrorBoundary>`），炸了显示异常正文 |
 | WebView2 偶发只画背景色 | 多实例共用 user data folder / 残留锁 | 每个实例用 `<数据根>\webview2`；实在不行设 `SDEMO_MEETING_DISABLE_GPU=1` |
 
-### P3 · 知识库投影（1 周）
+### P3 · 知识库投影（1 周）🟡 2026-11-16 写入链路完成
 
-| 任务 | 验收 |
-| --- | --- |
-| 「确认并归档」流程（mockup 03）：结论 + 转写一起进 KB | 归档后 KB 能搜到 |
-| 投影状态可见（v3 / 块数 / 排队中） | 列表行、详情右栏、同步条三处一致 |
-| outbox 与 `/v1/ingest` + `/v1/promote` | KB 离线不阻塞会议 |
+| 任务 | 验收 | 状态 |
+| --- | --- | --- |
+| 「确认并归档」流程 | 结论 + 转写一起进 KB | ✅ 头部「归档到知识库」：先 `ingest`（含转写）再 `promote` 到 durable |
+| 投影状态可见 | 列表行 / 详情 / 同步条三处一致 | 🟡 详情页有状态 pill（未归档 / 投影中 / 已归档 / 归档失败）；列表行徽章未做 |
+| outbox 与 `/v1/ingest` + `/v1/promote` | KB 离线不阻塞会议 | ✅ 失败只记 `Failed` + 次数，启动时补投（次数 <5）；KB 不在时给可照做的提示 |
 
+**落地细节**
+
+- `Core/KbProjectionService`：把会议变成 `kind=decision` / `retention=staging` 的 ingest 文档
+  （会议头 + 议题 + 决议 + 候选 + 可选转写），归档时再 `promote` 成 `durable`。
+- **幂等**：`idempotencyKey = sdemo.meeting/<id>/sha256:<正文前 16 字节>`，同样内容重复投影不会在 KB 里长第二份。
+- `Core/KbConnection`：地址读 `%LOCALAPPDATA%\SDemo\Hub\apps\sdemo.kb.json`，token 读
+  `...\sdemo.kb\tokens\sdemo.meeting.token`；两者缺一就当 KB 不在。
+- `Core/HttpKbTransport`：只做 POST + 解 `docId/version`，HTTP 失败也返回 `KbIngestResult(Error)` 而不是抛。
+- 传输抽象成 `IKbTransport`，所以整条投影逻辑在没有 KB 的机器上有 8 个测试覆盖。
+
+**与 KB 契约的一处偏差（需要你知道）**
+
+`kb-design` §4.2 写的是「会议原始转写不进 KB」（噪音 + 隐私 + 体积）。但你的产品决定是
+**证据和结论都进 KB**（会议里删了还能去 KB 查）。折中：
+
+- 默认投影（自动/后台）只写结论：议题、决议、候选；
+- 只有用户点「归档到知识库」这个显式动作，才把转写一起写进去。
+
+这样契约默认仍然成立，用户显式要求时才有证据链。
+
+**没做**
+
+- 列表行的 KB 徽章；`/v1/refs` 登记（议题 refs 目前只是写进正文，没登记成引用）；
+- KB 侧 `kb_block.origin`（从 KB 跳回会议原文）需要先提契约。
 ### P4 · 分析链路（1 周，Agent 侧为主）
 
 | 任务 | 验收 |
@@ -178,4 +202,5 @@ SDemo.Meeting.exe
 | 2026-11-16 | 阶段 A/B、领域模型、MCP 读写面完成；本计划立稿 |
 | 2026-11-16 | **P0 完成**：单进程（WPF 外壳 + 进程内 MCP）、双模入口、单实例、`deploy/app.json`、`meeting.log`；实机截图确认窗口渲染、关窗后 runtime 转 `stopped` |
 | 2026-11-16 | **P1 主体完成**：录音卡 + 计时 + 双轨开关 + 停止自动转写 + 进度 + 取消；状态机抽到 Core 并用假采集写了 9 个测试；P1-4 桌面小组件推迟 |
+| 2026-11-16 | **P3 写入链路完成**：会议 → KB 的 ingest/promote、幂等键、离线补投、状态 pill；KB 未装时实机验证了失败提示 |
 | 2026-11-16 | **P2 主体完成**：三栏 + 右栏检视（议题/决议/候选/审计）+ 段落「标为决议/候选」带 anchor + 确认决议；踩了 `OnParametersSet` 重入导致渲染器静默死亡的坑，加了错误边界与页面探查日志 |
