@@ -62,13 +62,13 @@ public sealed class McpServerTests : IDisposable
         var response = Call("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""");
         var tools = response!["result"]!["tools"]!.AsArray();
 
-        Assert.Equal(13, tools.Count);
+        Assert.Equal(17, tools.Count);
 
         var reads = tools.Where(t => t!["annotations"]!["readOnlyHint"]!.GetValue<bool>()).ToArray();
         var writes = tools.Where(t => !t!["annotations"]!["readOnlyHint"]!.GetValue<bool>()).ToArray();
 
-        Assert.Equal(7, reads.Length);
-        Assert.Equal(6, writes.Length);
+        Assert.Equal(8, reads.Length);
+        Assert.Equal(9, writes.Length);
 
         foreach (var tool in reads)
         {

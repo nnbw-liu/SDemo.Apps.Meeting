@@ -174,10 +174,45 @@ SDemo.Meeting.exe
 
 - 列表行的 KB 徽章；`/v1/refs` 登记（议题 refs 目前只是写进正文，没登记成引用）；
 - KB 侧 `kb_block.origin`（从 KB 跳回会议原文）需要先提契约。
-### P4 · 分析链路（1 周，Agent 侧为主）
+### P4 · 分析链路（1 周，Agent 侧为主）🟡 2026-11-16 Meeting 侧完成
 
-| 任务 | 验收 |
-| --- | --- |
+| 任务 | 验收 | 状态 |
+| --- | --- | --- |
+| Meeting 侧分析队列 | Agent 能按作业取件 | ✅ `mtg_analysis` + `meeting_request/claim/finish/status` 四个工具；claim 原子、入队幂等 |
+| 分段取件 | Agent 按窗口拉段 | ✅ 复用 `meeting_transcript` 的 `fromMs/toMs/limit` |
+| Agent 侧 map-reduce | 点「分析」后界面出现待审阅条目 | ⬜ **未做**（在 DesktopAgent：claim → 逐段抽 → 写工具落库 → finish） |
+| 履历 | provider / prompt_version 可追溯 | 🟡 作业行记了 provider / promptVersion / 段数 / 产出条数 |
+
+**分工（重要）**
+
+Meeting **不调模型**（零凭证铁律）。所以 P4 被切成两半：
+
+```
+Meeting（已完成）                 DesktopAgent（待做）
+用户点「分析」→ 入队    ──►   claim → 分页取段 → 逐段抽 → 写工具 → finish
+界面轮询状态 / 产出条数 ◄──
+```
+
+**Meeting 侧约定**
+
+- 同一场会议同时只允许一个 `Queued`/`Running`，重复点「分析」幂等返回同一个作业。
+- `claim` 用带 `status='Queued'` 条件的 UPDATE，两个 Agent 抢同一场只会有一个人拿到。
+- 完成时**只记产出条数**，真正的议题/决议/候选仍走 P2 的写工具——写路径只有一条。
+- 失败记 `error` 后可重新入队（会新建一个作业，旧作业留作履历）。
+- 没有转写结果的会议不能入队（直接报错，不给 Agent 空作业）。
+
+**实测（MCP 驱动，模拟 Agent）**
+
+```
+request  → queued, segmentsTotal=9
+claim    → running
+finish   → done, topics=2 decisions=1 actions=3 provider=deepseek-flash
+status   → done
+审计     → request / claim / finish 三条 Agent 记录（失败的一次也留了 error 行）
+```
+
+界面：会议头显示 `已分析 · 2 议题`，点「分析」后转 `待分析` → `分析中 n/9` → 完成后刷新右栏。
+--- | --- |
 | Meeting 侧 `mtg_analysis_request` 队列 + 分段取件端点 | Agent 能按窗口拉段 |
 | Agent 侧 map-reduce：逐段抽议题/决议/候选 → reduce 汇总 | 点"分析"后界面出现待审阅条目 |
 | `mtg_analysis` 履历（provider / prompt_version） | 重跑可对比 |
@@ -202,5 +237,6 @@ SDemo.Meeting.exe
 | 2026-11-16 | 阶段 A/B、领域模型、MCP 读写面完成；本计划立稿 |
 | 2026-11-16 | **P0 完成**：单进程（WPF 外壳 + 进程内 MCP）、双模入口、单实例、`deploy/app.json`、`meeting.log`；实机截图确认窗口渲染、关窗后 runtime 转 `stopped` |
 | 2026-11-16 | **P1 主体完成**：录音卡 + 计时 + 双轨开关 + 停止自动转写 + 进度 + 取消；状态机抽到 Core 并用假采集写了 9 个测试；P1-4 桌面小组件推迟 |
+| 2026-11-16 | **P4 Meeting 侧完成**：分析队列 + 4 个 MCP 工具 + 界面状态轮询；Agent 侧 map-reduce 驱动未做 |
 | 2026-11-16 | **P3 写入链路完成**：会议 → KB 的 ingest/promote、幂等键、离线补投、状态 pill；KB 未装时实机验证了失败提示 |
 | 2026-11-16 | **P2 主体完成**：三栏 + 右栏检视（议题/决议/候选/审计）+ 段落「标为决议/候选」带 anchor + 确认决议；踩了 `OnParametersSet` 重入导致渲染器静默死亡的坑，加了错误边界与页面探查日志 |

@@ -210,6 +210,55 @@ public static class MeetingToolCatalog
             Idempotent: false),
 
         new McpToolDefinition(
+            "meeting_request_analysis",
+            "把会议排进分析队列（Meeting 不调模型，由 Agent claim 后做）。同一场会议排队期间幂等。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "id":{"type":"string","description":"会议 id"},
+              "promptVersion":{"type":"string","maxLength":64}
+            },"required":["id"]}
+            """,
+            ToolRisk.Medium,
+            ReadOnly: false,
+            Idempotent: true),
+
+        new McpToolDefinition(
+            "meeting_claim_analysis",
+            "取一个排队中的分析作业并置为 Running（原子，两个 Agent 不会抢同一场）。没有则返回 null。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{}}
+            """,
+            ToolRisk.Medium,
+            ReadOnly: false),
+
+        new McpToolDefinition(
+            "meeting_analysis_status",
+            "查某场会议最近一次分析的状态与产出条数。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "id":{"type":"string","description":"会议 id"}
+            },"required":["id"]}
+            """,
+            ToolRisk.Low,
+            ReadOnly: true),
+
+        new McpToolDefinition(
+            "meeting_finish_analysis",
+            "结束分析作业：带 counts 表示完成，带 error 表示失败。完成不代表写入——议题/决议/候选要用各自的写工具落库。",
+            """
+            {"type":"object","additionalProperties":false,"properties":{
+              "jobId":{"type":"string"},
+              "segmentsDone":{"type":"integer","minimum":0},
+              "topics":{"type":"integer","minimum":0},
+              "decisions":{"type":"integer","minimum":0},
+              "actions":{"type":"integer","minimum":0},
+              "provider":{"type":"string","maxLength":64},
+              "error":{"type":"string","maxLength":500}
+            },"required":["jobId"]}
+            """,
+            ToolRisk.Medium,
+            ReadOnly: false),
+        new McpToolDefinition(
             "meeting_mark_action",
             "改候选状态。转 intaken 必须带 plannerRef（sdemo.planner/...），否则拒绝。",
             """

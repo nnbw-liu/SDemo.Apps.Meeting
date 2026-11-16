@@ -20,6 +20,7 @@ public sealed class MeetingMcpServer
     private readonly MeetingService _meetings;
     private readonly MeetingDomainService _domain;
     private readonly MeetingAuditLog _audit;
+    private readonly AnalysisQueueService _analysis;
 
     public MeetingMcpServer(
         MeetingQuery query,
@@ -31,6 +32,7 @@ public sealed class MeetingMcpServer
         _meetings = meetings;
         _domain = domain ?? new MeetingDomainService(query.Session);
         _audit = audit ?? new MeetingAuditLog(query.Session);
+        _analysis = new AnalysisQueueService(query.Session);
     }
 
     /// <summary>处理一条 JSON-RPC 消息；返回空字符串表示"只有通知、无需响应"。</summary>
@@ -156,6 +158,7 @@ public sealed class MeetingMcpServer
             "meeting_topics" => ListTopics(args),
             "meeting_decisions" => ListDecisions(args),
             "meeting_actions" => ListActions(args),
+            "meeting_analysis_status" => AnalysisStatus(args),
             _ => throw new MeetingException(MeetingErrorCodes.InvalidArgument, $"未知工具：{name}"),
         };
 
@@ -169,6 +172,7 @@ public sealed class MeetingMcpServer
         {
             "meeting_add_topic" or "meeting_update_topic" => "topic",
             "meeting_add_decision" or "meeting_confirm_decision" => "decision",
+            "meeting_request_analysis" or "meeting_claim_analysis" or "meeting_finish_analysis" => "analysis",
             _ => "action",
         };
 
@@ -182,6 +186,9 @@ public sealed class MeetingMcpServer
                 "meeting_confirm_decision" => ConfirmDecision(args),
                 "meeting_add_action" => AddAction(args),
                 "meeting_mark_action" => MarkAction(args),
+                "meeting_request_analysis" => RequestAnalysis(args),
+                "meeting_claim_analysis" => ClaimAnalysis(args),
+                "meeting_finish_analysis" => FinishAnalysis(args),
                 _ => throw new MeetingException(MeetingErrorCodes.InvalidArgument, $"未知写工具：{name}"),
             };
 
@@ -302,6 +309,87 @@ public sealed class MeetingMcpServer
 
         return (ActionJson(updated), "mark", updated.Id, updated.MeetingId);
     }
+
+    // ── 分析队列 ────────────────────────────────────────────────────────
+
+    private JsonObject AnalysisStatus(JsonObject args)
+    {
+        var id = RequireString(args, "id");
+        var job = _analysis.Latest(id);
+
+        return new JsonObject
+        {
+            ["meetingId"] = id,
+            ["hasJob"] = job.Id.Length > 0,
+            ["job"] = job.Id.Length == 0 ? null : AnalysisJson(job),
+        };
+    }
+
+    private (JsonObject Payload, string Action, string EntityId, string MeetingId) RequestAnalysis(JsonObject args)
+    {
+        var meetingId = RequireString(args, "id");
+        var job = _analysis.Request(meetingId, AnalysisQueueService.RequestedByAgent, GetString(args, "promptVersion"));
+
+        return (AnalysisJson(job), "request", job.Id, meetingId);
+    }
+
+    private (JsonObject Payload, string Action, string EntityId, string MeetingId) ClaimAnalysis(JsonObject args)
+    {
+        var job = _analysis.Claim();
+
+        return job is null
+            ? (new JsonObject { ["job"] = null, ["notice"] = "队列里没有待分析的会议" }, "claim", string.Empty, string.Empty)
+            : (AnalysisJson(job), "claim", job.Id, job.MeetingId);
+    }
+
+    private (JsonObject Payload, string Action, string EntityId, string MeetingId) FinishAnalysis(JsonObject args)
+    {
+        var jobId = RequireString(args, "jobId");
+        var error = GetString(args, "error");
+
+        string action;
+        AnalysisJob job;
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            job = _analysis.Fail(jobId, error);
+            action = "fail";
+        }
+        else
+        {
+            var segmentsDone = args["segmentsDone"] is JsonValue s && s.TryGetValue<int>(out var sd) ? sd : -1;
+            if (segmentsDone >= 0) _analysis.Progress(jobId, segmentsDone);
+
+            job = _analysis.Complete(
+                jobId,
+                GetInt(args, "topics", 0),
+                GetInt(args, "decisions", 0),
+                GetInt(args, "actions", 0),
+                GetString(args, "provider"));
+            action = "complete";
+        }
+
+        return (AnalysisJson(job), action, job.Id, job.MeetingId);
+    }
+
+    private static JsonObject AnalysisJson(AnalysisJob job) => new()
+    {
+        ["id"] = job.Id,
+        ["meetingId"] = job.MeetingId,
+        ["status"] = job.Status.ToString().ToLowerInvariant(),
+        ["requestedBy"] = job.RequestedBy,
+        ["provider"] = job.Provider,
+        ["promptVersion"] = job.PromptVersion,
+        ["segmentsTotal"] = job.SegmentsTotal,
+        ["segmentsDone"] = job.SegmentsDone,
+        ["topics"] = job.TopicsCreated,
+        ["decisions"] = job.DecisionsCreated,
+        ["actions"] = job.ActionsCreated,
+        ["error"] = job.Error,
+        ["createdAt"] = job.CreatedAt.ToString("O"),
+        ["startedAt"] = job.StartedAt?.ToString("O"),
+        ["finishedAt"] = job.FinishedAt?.ToString("O"),
+    };
 
     // ── 实体 JSON ───────────────────────────────────────────────────────
 

@@ -3,6 +3,8 @@
 @inject MeetingDomainService DomainService
 @inject MeetingAuditLog AuditLog
 @inject KbProjectionService Projection
+@inject AnalysisQueueService Analysis
+@implements IDisposable
 
 <div class="mtg-app">
     <aside class="mtg-side">
@@ -75,6 +77,8 @@
                     </div>
                 </div>
                 <div class="mtg-head-actions">
+                    <span class="pill @AnalysisPillClass">@AnalysisText</span>
+                    <button class="btn-ghost" @onclick="RequestAnalysisAsync" disabled="@_analysisBusy">分析</button>
                     <span class="pill @KbPillClass">@KbStatusText</span>
                     <button class="btn-ghost" @onclick="ArchiveToKbAsync" disabled="@_archiving">
                         @(_projection?.DocId is null ? "归档到知识库" : "重新归档")
@@ -186,6 +190,9 @@
     private MeetingDomain? _domain;
     private IReadOnlyList<AuditRecord> _audit = Array.Empty<AuditRecord>();
     private ProjectionRecord? _projection;
+    private AnalysisJob? _analysisJob;
+    private bool _analysisBusy;
+    private CancellationTokenSource? _pollCts;
     private bool _archiving;
     private string? _topicId;
     private string? _selectedId;
@@ -211,6 +218,7 @@
         _domain = _detail is null ? null : DomainService.Get(meetingId);
         _audit = AuditLog.List(meetingId, 5);
         _projection = Projection.Get(meetingId);
+        _analysisJob = LoadAnalysis(meetingId);
         _topicId = null;
         _activeOrdinal = null;
         _filter = string.Empty;
@@ -316,6 +324,7 @@
         _domain = _detail is null ? null : DomainService.Get(id);
         _audit = AuditLog.List(id, 5);
         _projection = Projection.Get(id);
+        _analysisJob = LoadAnalysis(id);
     }
 
     /// <summary>归档 = 先投影（含转写，这是用户显式动作），再把同一份 doc 升到 durable。</summary>
@@ -365,6 +374,98 @@
         ProjectionStatus.Failed => "pill-failed",
         _ => string.Empty,
     };
+
+    private AnalysisJob? LoadAnalysis(string meetingId)
+    {
+        var job = Analysis.Latest(meetingId);
+        return job.Id.Length == 0 ? null : job;
+    }
+
+    /// <summary>点「分析」：只入队。真正的 map-reduce 由 DesktopAgent claim 后做。</summary>
+    private async Task RequestAnalysisAsync()
+    {
+        if (_detail is null) return;
+
+        _analysisBusy = true;
+        try
+        {
+            _analysisJob = Analysis.Request(_detail.Meeting.Id);
+            _flash = "已排进分析队列，等 Agent 取件（Meeting 自己不调模型）";
+            StartPolling(_detail.Meeting.Id);
+        }
+        catch (MeetingException ex)
+        {
+            _flash = ex.Message;
+        }
+        finally
+        {
+            _analysisBusy = false;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private void StartPolling(string meetingId)
+    {
+        _pollCts?.Cancel();
+        _pollCts = new CancellationTokenSource();
+        var token = _pollCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                var job = Analysis.Latest(meetingId);
+                if (job.Id.Length == 0) continue;
+
+                await InvokeAsync(() =>
+                {
+                    _analysisJob = job;
+                    StateHasChanged();
+                });
+
+                if (job.Status is AnalysisJobStatus.Done or AnalysisJobStatus.Failed)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        _flash = job.Status == AnalysisJobStatus.Done
+                            ? $"分析完成：{job.TopicsCreated} 议题 / {job.DecisionsCreated} 决议 / {job.ActionsCreated} 候选"
+                            : $"分析失败：{job.Error}";
+                        Reload();
+                    });
+                    return;
+                }
+            }
+        }, token);
+    }
+
+    private string AnalysisText => _analysisJob?.Status switch
+    {
+        AnalysisJobStatus.Queued => "待分析",
+        AnalysisJobStatus.Running => $"分析中 {_analysisJob.SegmentsDone}/{_analysisJob.SegmentsTotal}",
+        AnalysisJobStatus.Done => $"已分析 · {_analysisJob.TopicsCreated} 议题",
+        AnalysisJobStatus.Failed => "分析失败",
+        _ => "未分析",
+    };
+
+    private string AnalysisPillClass => _analysisJob?.Status switch
+    {
+        AnalysisJobStatus.Done => "pill-ready",
+        AnalysisJobStatus.Failed => "pill-failed",
+        AnalysisJobStatus.Running or AnalysisJobStatus.Queued => "pill-transcribing",
+        _ => string.Empty,
+    };
+
+    public void Dispose() => _pollCts?.Cancel();
 
     /// <summary>录音/转写完成后：刷新列表并选中刚录的那场。</summary>
     private void OnRecordCompleted(string meetingId)

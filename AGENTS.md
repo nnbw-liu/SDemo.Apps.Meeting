@@ -13,6 +13,7 @@
 A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x80070005），需在有权限的机器上复验。
 ✍️ **MCP 写面已开**：6 个写工具走 `MeetingDomainService`，成功与失败都落 `mtg_audit`（参数只存 300 字摘要）；`meeting audit` 可查。
 🏷️ **领域模型已建**：`mtg_topic` / `mtg_decision` / `mtg_action`（schema v3，老库就地迁移）；候选转 `intaken` 必须带 `plannerRef`。
+🧠 **P4 Meeting 侧完成**：分析队列（`mtg_analysis`）+ `meeting_request/claim/finish/status` 四个工具；**Meeting 不调模型**，map-reduce 由 DesktopAgent claim 后做。界面有「分析」按钮与状态轮询。
 📚 **P3 写入链路完成**：会议 → KB 的 `ingest` + `promote`（归档 = 同一 doc 升 durable）、内容哈希幂等键、KB 不在时只记失败并在启动补投。**KB 本机未安装**，真实 ingest 未联调。
 🗂️ **P2 主体完成**：三栏 + 右栏检视（议题增删、确认决议、候选拒绝、最近改动），段落可「标为决议/标为候选」并带时间码 anchor；UI 写操作也落审计（actor=User）。
 🎙️ **P1 主体完成**：录音卡（开始/计时/停止并转写/取消/进度）+ 双轨开关；状态机在 `Core.RecordingCoordinator`，采集与引擎注入，无麦克风也能测。本机仍被 Windows 麦克风权限拒绝（0x80070005），真机录音待放开。
@@ -22,17 +23,17 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 | 层 | 状态 |
 | --- | --- |
 | `Contracts` | 枚举 / DTO / `IAsrProvider` 能力契约 / 错误码 / UUIDv7 / WAV 头解析 |
-| `Storage` | schema v4：`mtg_meeting` / `mtg_audio_asset` / `mtg_transcript_run` / `mtg_segment` / `mtg_meta` + `mtg_topic` / `mtg_decision` / `mtg_action` + `mtg_audit` + `mtg_projection` |
-| `Core` | `MeetingService`、`TranscriptionRunner`、`TranscriptQuality`、`MeetingDomainService`、`MeetingAuditLog`、`MeetingQuery`、`TranscriptEditor`、`RecordingCoordinator`、`KbProjectionService`（KB 投影）、`KbConnection`/`HttpKbTransport` |
+| `Storage` | schema v5：`mtg_meeting` / `mtg_audio_asset` / `mtg_transcript_run` / `mtg_segment` / `mtg_meta` + `mtg_topic` / `mtg_decision` / `mtg_action` + `mtg_audit` + `mtg_projection` + `mtg_analysis` |
+| `Core` | `MeetingService`、`TranscriptionRunner`、`TranscriptQuality`、`MeetingDomainService`、`MeetingAuditLog`、`MeetingQuery`、`TranscriptEditor`、`RecordingCoordinator`、`KbProjectionService`（KB 投影）、`KbConnection`/`HttpKbTransport`、`AnalysisQueueService`（分析队列） |
 | `Asr` | `WhisperCppProvider`（Whisper.net 1.8.1）、`ChatAudioProvider`（回环/云端 chat）、`DeepSeekToolsProvider`（`/v1/tools/asr`）、模型目录 |
 | `Audio` | `DualTrackRecorder`（WASAPI 麦克风 + 环回，带启动超时看门狗）、`WavDownmixer` |
-| `Mcp` | `MeetingMcpServer`（JSON-RPC：initialize / ping / tools/list / tools/call）+ 7 个只读 + 6 个写工具（add_topic / update_topic / add_decision / confirm_decision / add_action / mark_action），写工具 risk=medium、approval=once、每次调用落 `mtg_audit` |
+| `Mcp` | `MeetingMcpServer`（JSON-RPC：initialize / ping / tools/list / tools/call）+ 8 个只读 + 9 个写工具（议题/决议/候选的增改确认 + 分析队列的 request/claim/finish），写工具 risk=medium、approval=once、每次调用落 `mtg_audit` |
 | `Web` | `MainShell.razor`（错误边界）、`MeetingResult.razor`（三栏）、`DomainPanel.razor`（议题/决议/候选/审计）、`RecordPanel.razor`（录音卡） |
 | `Host` | **主程序**：WPF 外壳 + BlazorWebView + 进程内 MCP（`SDemo.Meeting.exe`）；带参时是 CLI：`record` / `import` / `transcribe` / `resume` / `list` / `show` / `models` / `audit` / `doctor` / `tools` / `serve` |
 
 ## 开工先做三件事
 
-1. **阶段 A/B、领域模型、MCP 读写面、P0–P3 都完成了**。下一步按 [docs/app-plan.md](docs/app-plan.md)：**P4 分析链路**（Agent 侧 map-reduce 抽议题/决议/候选）、P1-4 录音小组件、P3 剩余（列表徽章 / `/v1/refs` 登记 / 真实 KB 联调）。
+1. **阶段 A/B、领域模型、MCP 读写面、P0–P4（Meeting 侧）都完成了**。下一步：**Agent 侧 map-reduce 驱动**（DesktopAgent：claim → 取段 → 抽 → 写 → finish）、P1-4 录音小组件、P3 剩余（列表徽章 / `/v1/refs` 登记 / 真实 KB 联调）。
 2. 主程序已经是单进程形态（`SDemo.Meeting.exe`），**别再拆出第二个 exe**——界面和 MCP 必须同一个库、同一个生命周期。
 3. `workspaces/meeting.json` 已是 `active`。
 
@@ -96,6 +97,7 @@ src\SDemo.App.Meeting.Host\bin\Release\net10.0-windows10.0.19041.0\SDemo.Meeting
 - **`HttpListener` 对空 POST 回 411**：`POST /v1/shutdown` 这类无 body 的请求必须带 `Content-Length: 0`（curl 用 `-d ''`），否则在进到处理函数之前就被拒。
 - **写工具必须落审计**：`MeetingMcpServer` 只在 `MeetingToolCatalog.WriteToolNames` 命中时审计；新增写工具记得把 `ReadOnly: false`（名单自动派生，别手写第二份）。
 - **审计只存 300 字摘要**：正文不进 `mtg_audit`，否则审计表会变成第二份业务数据。
+- **分析链路分两半**：Meeting 只排队（零凭证，不调模型），DesktopAgent claim 后做 map-reduce，最后用写工具落库再 `meeting_finish_analysis`。别把模型调用塞进 Meeting。
 - **KB 投影默认只写结论**：议题/决议/候选；转写只在用户点「归档到知识库」时写（KB 契约默认不进转写，产品决定要证据链）。
 - **候选转 `intaken` 必须带 `plannerRef`**（`sdemo.planner/...`）：没有引用说明"安排"没发生，`MeetingDomainService` 会直接拒绝。
 - **别在 `OnParametersSet` 里回调父组件**：参数设置期间重入渲染会让 WebView 渲染器静默卡死（窗口空白、日志无异常）。父组件回调只在用户点击时发。

@@ -103,6 +103,10 @@ internal sealed class MeetingHost : IDisposable
         return Server.Port;
     }
 
+    public AnalysisQueueService Analysis => _analysis ??= new AnalysisQueueService(Session);
+
+    private AnalysisQueueService? _analysis;
+
     public KbProjectionService Projection => _projection ??= new KbProjectionService(
         Session,
         Domain,
@@ -146,6 +150,7 @@ internal sealed class MeetingHost : IDisposable
         services.AddSingleton(Audit);
         services.AddSingleton(new TranscriptEditor(Session));
         services.AddSingleton(Projection);
+        services.AddSingleton(Analysis);
         services.AddSingleton(Recorder);
 
         return services.BuildServiceProvider();
