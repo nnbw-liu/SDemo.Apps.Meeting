@@ -1,5 +1,7 @@
 @inject MeetingQuery Query
 @inject TranscriptEditor Editor
+@inject MeetingDomainService DomainService
+@inject MeetingAuditLog AuditLog
 
 <div class="mtg-app">
     <aside class="mtg-side">
@@ -64,6 +66,11 @@
                         <span>@_detail.Audio.Count 条音轨</span>
                         <span class="dot"></span>
                         <span>@(_detail.Current?.Segments.Count ?? 0) 段 · @(_detail.Current?.TotalChars ?? 0) 字</span>
+                        @if (_domain is { } d)
+                        {
+                            <span class="dot"></span>
+                            <span>@d.Topics.Count 议题 · @d.ConfirmedDecisions 决议 · @d.CandidateActions 候选</span>
+                        }
                     </div>
                 </div>
                 <div class="mtg-head-actions">
@@ -133,6 +140,12 @@
                                 <button class="btn-ghost" @onclick="() => TagFromHereAsync(seg.Ordinal)">
                                     从此段起
                                 </button>
+                                <button class="btn-ghost btn-domain" @onclick="() => MarkDecisionAsync(seg)" title="按当前议题记为决议（proposed）">
+                                    标为决议
+                                </button>
+                                <button class="btn-ghost btn-domain" @onclick="() => MarkActionAsync(seg)" title="按当前议题记为待办候选">
+                                    标为候选
+                                </button>
                             </div>
                         </li>
                     }
@@ -147,12 +160,27 @@
             }
         }
     </section>
+
+    @if (_detail is not null && _domain is not null)
+    {
+        <aside class="mtg-rail">
+            <DomainPanel MeetingId="_detail.Meeting.Id"
+                        Domain="_domain"
+                        SelectedTopicId="_topicId"
+                        OnSelectTopic="id => _topicId = id"
+                        Audit="_audit"
+                        OnMutated="Reload" />
+        </aside>
+    }
 </div>
 
 @code {
     private IReadOnlyList<MeetingListItem> _items = Array.Empty<MeetingListItem>();
     private IReadOnlyList<string> _speakers = Array.Empty<string>();
     private MeetingDetail? _detail;
+    private MeetingDomain? _domain;
+    private IReadOnlyList<AuditRecord> _audit = Array.Empty<AuditRecord>();
+    private string? _topicId;
     private string? _selectedId;
     private string _filter = string.Empty;
     private int? _activeOrdinal;
@@ -173,9 +201,50 @@
     {
         _selectedId = meetingId;
         _detail = Query.GetDetail(meetingId);
+        _domain = _detail is null ? null : DomainService.Get(meetingId);
+        _audit = AuditLog.List(meetingId, 5);
+        _topicId = null;
         _activeOrdinal = null;
         _filter = string.Empty;
         _flash = null;
+    }
+
+    private async Task MarkDecisionAsync(TranscriptSegmentRecord seg)
+    {
+        if (_detail is null) return;
+
+        try
+        {
+            var created = DomainService.AddDecision(_detail.Meeting.Id, seg.Text, _topicId, owner: seg.Speaker, anchorMs: seg.StartMs);
+            AuditLog.Write("ui", "create", "decision", created.Id, _detail.Meeting.Id, actor: AuditActor.User);
+            _flash = $"已标为决议（待确认）· {Timecode(seg.StartMs)}";
+            Reload();
+        }
+        catch (MeetingException ex)
+        {
+            _flash = ex.Message;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private async Task MarkActionAsync(TranscriptSegmentRecord seg)
+    {
+        if (_detail is null) return;
+
+        try
+        {
+            var created = DomainService.AddAction(_detail.Meeting.Id, seg.Text, _topicId, owner: seg.Speaker, anchorMs: seg.StartMs);
+            AuditLog.Write("ui", "create", "action", created.Id, _detail.Meeting.Id, actor: AuditActor.User);
+            _flash = $"已标为待办候选 · {Timecode(seg.StartMs)}";
+            Reload();
+        }
+        catch (MeetingException ex)
+        {
+            _flash = ex.Message;
+        }
+
+        await Task.CompletedTask;
     }
 
     private Task SelectAsync(string meetingId)
@@ -233,7 +302,11 @@
     {
         _items = Query.List();
         _speakers = Query.KnownSpeakers();
-        if (_selectedId is { } id) _detail = Query.GetDetail(id);
+        if (_selectedId is not { } id) return;
+
+        _detail = Query.GetDetail(id);
+        _domain = _detail is null ? null : DomainService.Get(id);
+        _audit = AuditLog.List(id, 5);
     }
 
     /// <summary>录音/转写完成后：刷新列表并选中刚录的那场。</summary>
@@ -243,6 +316,8 @@
         _speakers = Query.KnownSpeakers();
         _selectedId = meetingId;
         _detail = Query.GetDetail(meetingId);
+        _domain = _detail is null ? null : DomainService.Get(meetingId);
+        _topicId = null;
         _activeOrdinal = null;
         _filter = string.Empty;
         _flash = "这场是刚录的，转写已完成";

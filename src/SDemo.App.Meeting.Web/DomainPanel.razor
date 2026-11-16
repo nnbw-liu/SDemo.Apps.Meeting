@@ -1,0 +1,243 @@
+@using SDemo.App.Meeting.Contracts
+@using SDemo.App.Meeting.Core
+@inject MeetingDomainService DomainService
+@inject MeetingAuditLog AuditLog
+
+<div class="rail-head">
+    <span class="eyebrow">检视</span>
+    <span class="rail-counts">@Domain.Topics.Count 议题 · @Domain.ConfirmedDecisions 决议 · @Domain.CandidateActions 候选</span>
+</div>
+
+@if (_message is { Length: > 0 })
+{
+    <div class="rail-flash">@_message</div>
+}
+
+<div class="rail-section">
+    <div class="rail-section-head">
+        <span>议题</span>
+        <button class="rail-add" @onclick="() => _adding = !_adding">＋</button>
+    </div>
+
+    @if (_adding)
+    {
+        <div class="rail-inline">
+            <input class="mtg-input mtg-input-sm" placeholder="议题标题" @bind="_newTopic" />
+            <button class="btn-ghost" @onclick="AddTopicAsync">加上</button>
+        </div>
+    }
+
+    @if (Domain.Topics.Count == 0)
+    {
+        <p class="rail-empty">还没有议题。段落右侧「标为决议 / 标为候选」会归到当前议题。</p>
+    }
+    else
+    {
+        <ul class="rail-topics">
+            @foreach (var topic in Domain.Topics)
+            {
+                <li class="rail-topic @(topic.Id == SelectedTopicId ? "is-active" : "")" @key="topic.Id">
+                    <button class="rail-topic-title" @onclick="() => SelectTopicAsync(topic.Id)">
+                        <span class="rail-ord">@(topic.Ordinal + 1)</span>
+                        @topic.Title
+                    </button>
+                    @if (topic.Refs.Count > 0)
+                    {
+                        <span class="rail-ref">refs @topic.Refs.Count</span>
+                    }
+                    <button class="rail-mini rail-mini-danger" title="删除议题" @onclick="() => RemoveTopicAsync(topic.Id)">✕</button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+<div class="rail-section">
+    <div class="rail-section-head">
+        <span>决议</span>
+        <span class="rail-hint">@Domain.ConfirmedDecisions / @Domain.Decisions.Count 已确认</span>
+    </div>
+
+    @if (Domain.Decisions.Count == 0)
+    {
+        <p class="rail-empty">还没有决议。确认后才是正式纪要。</p>
+    }
+    else
+    {
+        <ul class="rail-items">
+            @foreach (var decision in Domain.Decisions)
+            {
+                <li class="rail-item" @key="decision.Id">
+                    <div class="rail-item-head">
+                        <span class="pill @(decision.Status == DecisionStatus.Confirmed ? "pill-ready" : "")">
+                            @(decision.Status == DecisionStatus.Confirmed ? "已确认" : "待确认")
+                        </span>
+                        @if (decision.AnchorMs is { } anchor)
+                        {
+                            <span class="rail-anchor">@Timecode(anchor)</span>
+                        }
+                        @if (decision.Status == DecisionStatus.Proposed)
+                        {
+                            <button class="rail-mini rail-mini-ok" @onclick="() => ConfirmAsync(decision.Id)">确认</button>
+                        }
+                    </div>
+                    <p class="rail-text">@decision.Text</p>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+<div class="rail-section">
+    <div class="rail-section-head">
+        <span>待办候选</span>
+        <span class="rail-hint">@Domain.CandidateActions 条未安排</span>
+    </div>
+
+    @if (Domain.Actions.Count == 0)
+    {
+        <p class="rail-empty">候选不是待办：转待办要 Agent 在事序里建，再回写引用。</p>
+    }
+    else
+    {
+        <ul class="rail-items">
+            @foreach (var action in Domain.Actions)
+            {
+                <li class="rail-item @(action.Status == ActionStatus.Candidate ? "" : "is-done")" @key="action.Id">
+                    <div class="rail-item-head">
+                        <span class="pill">@StatusText(action.Status)</span>
+                        @if (action.AnchorMs is { } anchor)
+                        {
+                            <span class="rail-anchor">@Timecode(anchor)</span>
+                        }
+                        @if (action.Status == ActionStatus.Candidate)
+                        {
+                            <button class="rail-mini" @onclick="() => RejectAsync(action.Id)">不做</button>
+                        }
+                    </div>
+                    <p class="rail-text">@action.Text</p>
+                    @if (action.Owner is { Length: > 0 })
+                    {
+                        <span class="rail-meta">@action.Owner</span>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+<div class="rail-section">
+    <div class="rail-section-head"><span>最近改动</span></div>
+    @if (Audit.Count == 0)
+    {
+        <p class="rail-empty">还没有写操作。</p>
+    }
+    else
+    {
+        <ul class="rail-log">
+            @foreach (var entry in Audit)
+            {
+                <li class="@(entry.Outcome == "ok" ? "" : "is-error")">
+                    <span class="rail-log-time">@entry.At.ToLocalTime().ToString("HH:mm:ss")</span>
+                    <span class="rail-log-tool">@entry.Tool.Replace("meeting_", "", StringComparison.Ordinal)</span>
+                    <span class="rail-log-actor">@entry.Actor</span>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string MeetingId { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public MeetingDomain Domain { get; set; } = null!;
+
+    [Parameter] public string? SelectedTopicId { get; set; }
+
+    [Parameter] public EventCallback<string?> OnSelectTopic { get; set; }
+
+    [Parameter] public EventCallback OnMutated { get; set; }
+
+    /// <summary>最近写操作（由父组件查询后传入，组件自己不查库）。</summary>
+    [Parameter] public IReadOnlyList<AuditRecord> Audit { get; set; } = Array.Empty<AuditRecord>();
+
+    private bool _adding;
+    private string _newTopic = string.Empty;
+    private string? _message;
+
+    private Task SelectTopicAsync(string topicId) => OnSelectTopic.InvokeAsync(topicId);
+
+    private async Task AddTopicAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newTopic)) return;
+
+        try
+        {
+            var topic = DomainService.AddTopic(MeetingId, _newTopic);
+            AuditLog.Write("ui", "create", "topic", topic.Id, MeetingId, actor: AuditActor.User);
+            _newTopic = string.Empty;
+            _adding = false;
+            _message = $"加了议题「{topic.Title}」";
+            await OnSelectTopic.InvokeAsync(topic.Id);
+            await OnMutated.InvokeAsync();
+        }
+        catch (MeetingException ex)
+        {
+            _message = ex.Message;
+        }
+    }
+
+    private async Task RemoveTopicAsync(string topicId)
+    {
+        try
+        {
+            DomainService.RemoveTopic(topicId);
+            AuditLog.Write("ui", "delete", "topic", topicId, MeetingId, actor: AuditActor.User);
+            _message = "议题已删除（决议与候选保留）";
+            await OnMutated.InvokeAsync();
+        }
+        catch (MeetingException ex)
+        {
+            _message = ex.Message;
+        }
+    }
+
+    private async Task ConfirmAsync(string decisionId)
+    {
+        try
+        {
+            DomainService.ConfirmDecision(decisionId);
+            AuditLog.Write("ui", "confirm", "decision", decisionId, MeetingId, actor: AuditActor.User);
+            _message = "决议已确认";
+            await OnMutated.InvokeAsync();
+        }
+        catch (MeetingException ex)
+        {
+            _message = ex.Message;
+        }
+    }
+
+    private async Task RejectAsync(string actionId)
+    {
+        try
+        {
+            DomainService.MarkAction(actionId, ActionStatus.Rejected);
+            AuditLog.Write("ui", "reject", "action", actionId, MeetingId, actor: AuditActor.User);
+            _message = "候选已标为不做";
+            await OnMutated.InvokeAsync();
+        }
+        catch (MeetingException ex)
+        {
+            _message = ex.Message;
+        }
+    }
+
+    private static string StatusText(ActionStatus status) => status switch
+    {
+        ActionStatus.Candidate => "待安排",
+        ActionStatus.Intaken => "已安排",
+        _ => "不做",
+    };
+
+    private static string Timecode(int ms) => TimeSpan.FromMilliseconds(ms).ToString(@"hh\:mm\:ss");
+}

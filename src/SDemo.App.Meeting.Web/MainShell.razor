@@ -1,0 +1,13 @@
+@using Microsoft.AspNetCore.Components.Web
+@* 根组件的错误边界：组件炸掉时显示异常而不是留一片空白（GUI 没有控制台，空白最难查）。 *@
+<ErrorBoundary>
+    <ChildContent>
+        <MeetingResult />
+    </ChildContent>
+    <ErrorContent Context="exception">
+        <div style="padding:28px;font:13px/1.6 ui-monospace,Consolas,monospace;color:#c33;background:#fff7f7;height:100vh;overflow:auto">
+            <p style="font-weight:600;margin:0 0 8px">界面渲染失败（已捕获，未白屏）</p>
+            <pre style="white-space:pre-wrap;margin:0">@exception</pre>
+        </div>
+    </ErrorContent>
+</ErrorBoundary>

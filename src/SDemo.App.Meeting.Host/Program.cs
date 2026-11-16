@@ -61,7 +61,7 @@ public static class Program
             Log($"MCP 已在进程内启动：127.0.0.1:{port}");
 
             var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-            var window = new MainWindow(services);
+            var window = new MainWindow(services, Path.Combine(MeetingConstants.ResolveDataDir(), "webview2"));
             app.MainWindow = window;
             Log("窗口已创建，进入消息循环");
 
@@ -619,11 +619,20 @@ public static class Program
                     continue;
                 }
 
-                var key = a[2..];
+                var raw = a[2..];
+
+                // 同时接受 --key value 与 --key=value（后者在脚本和文档里更常见）
+                var eq = raw.IndexOf('=');
+                if (eq > 0)
+                {
+                    values[raw[..eq]] = raw[(eq + 1)..];
+                    continue;
+                }
+
                 if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
-                    values[key] = args[++i];
+                    values[raw] = args[++i];
                 else
-                    values[key] = "true";
+                    values[raw] = "true";
             }
 
             return new Options { Positional = positional }.With(values);

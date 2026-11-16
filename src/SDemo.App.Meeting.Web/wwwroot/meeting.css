@@ -40,7 +40,7 @@ html, body {
     font: 13px/1.55 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
 }
 
-.mtg-app { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100vh; }
+.mtg-app { display: grid; grid-template-columns: 260px minmax(0, 1fr) 330px; height: 100vh; }
 
 .mtg-side {
     display: flex; flex-direction: column; min-height: 0;
@@ -153,3 +153,62 @@ html, body {
 
 .rec-progress { margin-top: 10px; height: 6px; border-radius: 4px; background: rgba(255,255,255,.06); overflow: hidden; }
 .rec-progress-bar { height: 100%; background: var(--accent); transition: width .3s ease; }
+/* ── 右栏：议题 / 决议 / 候选 / 审计 ─────────────────────── */
+.mtg-rail {
+    display: flex; flex-direction: column; gap: 2px; min-height: 0;
+    border-left: 1px solid var(--line); background: var(--panel-2);
+    overflow-y: auto; padding: 14px 12px 24px;
+}
+.rail-head { display: flex; align-items: baseline; justify-content: space-between; padding: 0 2px 8px; }
+.rail-counts { color: var(--muted); font-size: 10.5px; }
+.rail-flash { margin: 0 0 8px; padding: 6px 9px; border-radius: 7px; background: var(--accent-soft); color: var(--text-soft); font-size: 11px; }
+
+.rail-section { border-top: 1px solid var(--line); padding: 10px 2px; }
+.rail-section:first-of-type { border-top: none; }
+.rail-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 11.5px; font-weight: 600; }
+.rail-hint { color: var(--muted); font-weight: 400; font-size: 10.5px; }
+.rail-empty { margin: 2px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+
+.rail-add, .rail-mini {
+    border: 1px solid var(--line); background: transparent; color: var(--muted);
+    border-radius: 6px; cursor: pointer; font-size: 11px; line-height: 1;
+}
+.rail-add { width: 20px; height: 20px; }
+.rail-mini { min-width: 22px; height: 20px; padding: 0 6px; white-space: nowrap; font-size: 10.5px; }
+.rail-add:hover, .rail-mini:hover { color: var(--text); border-color: var(--accent); }
+.rail-mini-ok { color: var(--green); border-color: rgba(74, 222, 128, .35); }
+.rail-mini-danger:hover { color: var(--red); border-color: var(--red); }
+
+.rail-inline { display: flex; gap: 6px; margin-bottom: 8px; }
+.rail-inline .mtg-input-sm { flex: 1 1 auto; width: auto; }
+
+.rail-topics { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rail-topic { display: flex; align-items: center; gap: 4px; padding: 4px 4px; border-radius: 7px; }
+.rail-topic:hover { background: rgba(255, 255, 255, .04); }
+.rail-topic.is-active { background: var(--accent-soft); }
+.rail-topic-title {
+    flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0;
+    border: none; background: transparent; color: var(--text-soft); font-size: 11.5px;
+    text-align: left; cursor: pointer; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rail-topic.is-active .rail-topic-title { color: var(--text); font-weight: 600; }
+.rail-ord { color: var(--muted); font: 10px ui-monospace, Consolas, monospace; }
+.rail-ref { color: var(--muted); font-size: 9.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+
+.rail-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rail-item { padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.rail-item.is-done { opacity: .62; }
+.rail-item-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rail-anchor { color: var(--accent); font: 10px ui-monospace, Consolas, monospace; }
+.rail-text { margin: 5px 0 0; color: var(--text-soft); font-size: 11.5px; line-height: 1.5; }
+.rail-meta { color: var(--muted); font-size: 10px; }
+.rail-ref-input { flex: 1 1 100%; margin-top: 4px; }
+
+.rail-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.rail-log li { display: flex; gap: 6px; color: var(--muted); font-size: 10px; }
+.rail-log li.is-error { color: var(--red); }
+.rail-log-time { font-family: ui-monospace, Consolas, monospace; }
+.rail-log-tool { color: var(--text-soft); }
+.rail-log-actor { margin-left: auto; }
+
+.btn-domain { color: var(--accent); }
