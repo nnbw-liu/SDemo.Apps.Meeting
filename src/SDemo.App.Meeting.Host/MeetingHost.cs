@@ -86,6 +86,11 @@ internal sealed class MeetingHost : IDisposable
         if (recovered > 0)
             Console.Error.WriteLine($"[info] {recovered} 个未完成的转写 run 已标记为 interrupted");
 
+        // 同理：Agent 崩了以后分析作业会一直挂在 Running，启动时收掉
+        var orphanedAnalysis = session.MarkRunningAnalysisInterrupted("上次进程中断，作业已作废", DateTimeOffset.UtcNow);
+        if (orphanedAnalysis > 0)
+            Console.Error.WriteLine($"[info] {orphanedAnalysis} 个中断的分析作业已标记为 failed");
+
         return new MeetingHost(database, session, meetings, new MeetingModelCatalog());
     }
 

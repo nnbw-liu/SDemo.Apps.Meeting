@@ -13,7 +13,7 @@
 A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x80070005），需在有权限的机器上复验。
 ✍️ **MCP 写面已开**：6 个写工具走 `MeetingDomainService`，成功与失败都落 `mtg_audit`（参数只存 300 字摘要）；`meeting audit` 可查。
 🏷️ **领域模型已建**：`mtg_topic` / `mtg_decision` / `mtg_action`（schema v3，老库就地迁移）；候选转 `intaken` 必须带 `plannerRef`。
-🧠 **P4 Meeting 侧完成**：分析队列（`mtg_analysis`）+ `meeting_request/claim/finish/status` 四个工具；**Meeting 不调模型**，map-reduce 由 DesktopAgent claim 后做。界面有「分析」按钮与状态轮询。
+🧠 **P4 完成（两端都通）**：Meeting 侧是分析队列（`mtg_analysis` + request/claim/finish/status 四个工具）；DesktopAgent 侧后台 claim 后逐页抽、用写工具落库再 finish。实机 9 段 → 3 议题 / 3 候选。界面有「分析」按钮与状态轮询。
 📚 **P3 完成（含真实联调）**：会议 → KB 的 `ingest`（归档直接 durable，含转写）、内容哈希幂等键、KB 不在时只记失败并在启动补投。已装 sdemo.kb 实测：文档进库、16 块、`ownerApp=sdemo.meeting`。**发现 `promote` 只给 KB 界面/Agent**（应用调 403），故归档一次写成 durable。
 🗂️ **P2 主体完成**：三栏 + 右栏检视（议题增删、确认决议、候选拒绝、最近改动），段落可「标为决议/标为候选」并带时间码 anchor；UI 写操作也落审计（actor=User）。
 🎙️ **P1 主体完成**：录音卡（开始/计时/停止并转写/取消/进度）+ 双轨开关；状态机在 `Core.RecordingCoordinator`，采集与引擎注入，无麦克风也能测。本机仍被 Windows 麦克风权限拒绝（0x80070005），真机录音待放开。
@@ -33,7 +33,7 @@ A5 双路采集代码完成，但本机被 Windows 麦克风隐私拒绝（0x800
 
 ## 开工先做三件事
 
-1. **阶段 A/B、领域模型、MCP 读写面、P0–P4（Meeting 侧）都完成了**。下一步：**Agent 侧 map-reduce 驱动**（DesktopAgent：claim → 取段 → 抽 → 写 → finish）、P1-4 录音小组件、P3 剩余（列表徽章 / `/v1/refs` 登记 / 真实 KB 联调）。
+1. **阶段 A/B、领域模型、MCP 读写面、P0–P4 全部完成**（P4 的 Agent 侧在 DesktopAgent 仓）。下一步：P1-4 录音小组件、P2 剩余（议题改名 / refs 编辑 / plannerRef 回填）、P3 剩余（列表徽章 / `/v1/refs` 登记）。
 2. 主程序已经是单进程形态（`SDemo.Meeting.exe`），**别再拆出第二个 exe**——界面和 MCP 必须同一个库、同一个生命周期。
 3. `workspaces/meeting.json` 已是 `active`。
 

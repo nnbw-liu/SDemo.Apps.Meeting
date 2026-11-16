@@ -183,21 +183,21 @@ SDemo.Meeting.exe
 
 - 列表行的 KB 徽章；`/v1/refs` 登记（议题 refs 目前只是写进正文，没登记成引用）；
 - KB 侧 `kb_block.origin`（从 KB 跳回会议原文）需要先提契约。
-### P4 · 分析链路（1 周，Agent 侧为主）🟡 2026-11-16 Meeting 侧完成
+### P4 · 分析链路（1 周）✅ 2026-11-16 完成（含真实联调）
 
 | 任务 | 验收 | 状态 |
 | --- | --- | --- |
 | Meeting 侧分析队列 | Agent 能按作业取件 | ✅ `mtg_analysis` + `meeting_request/claim/finish/status` 四个工具；claim 原子、入队幂等 |
 | 分段取件 | Agent 按窗口拉段 | ✅ 复用 `meeting_transcript` 的 `fromMs/toMs/limit` |
-| Agent 侧 map-reduce | 点「分析」后界面出现待审阅条目 | ⬜ **未做**（在 DesktopAgent：claim → 逐段抽 → 写工具落库 → finish） |
+| Agent 侧 map-reduce | 点「分析」后界面出现待审阅条目 | ✅ DesktopAgent 后台循环：claim → 分页取段 → 逐页抽 → 写工具落库 → finish（实机 9 段 → 3 议题 / 3 候选） |
 | 履历 | provider / prompt_version 可追溯 | 🟡 作业行记了 provider / promptVersion / 段数 / 产出条数 |
 
-**分工（重要）**
+**分工（已落地）**
 
 Meeting **不调模型**（零凭证铁律）。所以 P4 被切成两半：
 
 ```
-Meeting（已完成）                 DesktopAgent（待做）
+Meeting（已做）                     DesktopAgent（已做）
 用户点「分析」→ 入队    ──►   claim → 分页取段 → 逐段抽 → 写工具 → finish
 界面轮询状态 / 产出条数 ◄──
 ```
@@ -210,7 +210,7 @@ Meeting（已完成）                 DesktopAgent（待做）
 - 失败记 `error` 后可重新入队（会新建一个作业，旧作业留作履历）。
 - 没有转写结果的会议不能入队（直接报错，不给 Agent 空作业）。
 
-**实测（MCP 驱动，模拟 Agent）**
+**实测（真 Agent 跑通）**
 
 ```
 request  → queued, segmentsTotal=9

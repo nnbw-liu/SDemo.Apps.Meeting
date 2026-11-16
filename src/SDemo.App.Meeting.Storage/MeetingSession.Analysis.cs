@@ -127,6 +127,20 @@ public sealed partial class MeetingSession
         return GetAnalysis(id);
     }
 
+    /// <summary>进程重启时把卡在 Running 的作业标成失败，否则它们永远占着（Agent 崩了不会再回来）。</summary>
+    public int MarkRunningAnalysisInterrupted(string reason, DateTimeOffset now)
+    {
+        using var conn = _db.Connect();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE mtg_analysis SET status = 'Failed', error = $error, finished_at = $now
+             WHERE status = 'Running';
+            """;
+        cmd.Parameters.AddWithValue("$error", reason);
+        cmd.Parameters.AddWithValue("$now", Iso(now));
+        return cmd.ExecuteNonQuery();
+    }
+
     private static AnalysisJob ReadAnalysis(SqliteDataReader r) => new(
         r.GetString(r.GetOrdinal("id")),
         r.GetString(r.GetOrdinal("meeting_id")),
