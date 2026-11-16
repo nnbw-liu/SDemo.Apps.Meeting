@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -33,16 +34,43 @@ public sealed partial class ChatAudioProvider : IAsrProvider, IDisposable
     private readonly string _model;
     private readonly ChatAudioShape _shape;
 
-    public ChatAudioProvider(string baseUrl, string model, ChatAudioShape shape = ChatAudioShape.OpenAiInputAudio)
+    /// <param name="apiKey">云端端点（非回环）必填；本地回环可留空。</param>
+    /// <param name="allowRemote">
+    /// 显式放行非回环地址。默认关闭——云端转写是"用户逐场显式开启的例外"，
+    /// 不能因为填了个地址就悄悄把音频发出去。
+    /// </param>
+    public ChatAudioProvider(
+        string baseUrl,
+        string model,
+        ChatAudioShape shape = ChatAudioShape.OpenAiInputAudio,
+        string? apiKey = null,
+        bool allowRemote = false)
     {
-        if (!IsLoopback(baseUrl))
-            throw new MeetingException(MeetingErrorCodes.InvalidArgument, $"chat-audio 端点必须是回环地址：{baseUrl}");
+        var loopback = IsLoopback(baseUrl);
+
+        if (!loopback && !allowRemote)
+        {
+            throw new MeetingException(MeetingErrorCodes.InvalidArgument,
+                $"chat-audio 端点不是回环地址：{baseUrl}。云端端点必须显式加 --allow-remote（音频会上传）。");
+        }
+
+        if (!loopback && string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new MeetingException(MeetingErrorCodes.InvalidArgument,
+                "云端 chat-audio 端点需要 API Key（--api-key 或 SDEMO_ASR_API_KEY）。");
+        }
 
         _baseUrl = baseUrl.TrimEnd('/');
         _model = model;
         _shape = shape;
         _http = new HttpClient { Timeout = TimeSpan.FromMinutes(15) };
+
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
     }
+
+    /// <summary>端点是否在回环：决定"音频会不会出本机"。</summary>
+    public bool IsLocal => IsLoopback(_baseUrl);
 
     public string Id => EngineId;
 
@@ -80,9 +108,10 @@ public sealed partial class ChatAudioProvider : IAsrProvider, IDisposable
     public async Task<AsrResult> TranscribeAsync(AsrJob job, IProgress<AsrProgress>? progress, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
-        var format = WavFormatReader.TryRead(job.AudioPath, out var info, out var error)
-            ? info!
-            : throw new MeetingException(MeetingErrorCodes.AudioUnreadable, $"音频无法解析：{error}");
+        if (!WavFormatReader.TryRead(job.AudioPath, out var info, out var error) || info is null)
+            throw new MeetingException(MeetingErrorCodes.AudioUnreadable, $"音频无法解析：{error}");
+
+        var format = info;
 
         var bytes = await File.ReadAllBytesAsync(job.AudioPath, ct).ConfigureAwait(false);
         var payload = BuildPayload(_model, _shape, bytes);

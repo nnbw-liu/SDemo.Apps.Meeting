@@ -202,6 +202,28 @@ Qwen3-ASR 单模型带语种识别、并且支持极长音频（官方推理框�
 - spike 失败也不影响发布——whisper 单引擎已是完整产品；
 - 失败就砍掉升级档，S1/S4 降级为"提示用户这段可能不准"，而不是"重解"。
 
+### 4.6 第三种形状：DeepSeek `/v1/tools/asr`（实测 2026-11-16）
+
+除了"转写端点"和"多模态 chat"，还有第三种：**厂商自己的工具端点**。
+
+| 项 | DeepSeek `POST /v1/tools/asr` |
+| --- | --- |
+| 载荷 | `multipart/form-data`，`file` 字段（16-bit PCM WAV 或 Ogg Opus） |
+| 返回 | `{request_id, text, duration_ms}` — **纯文本，无时间戳、无分段** |
+| 语种 | 无参数，自动识别（21 种） |
+| 限制 | **≤ 8 MiB、≤ 120 秒**，上传 10 分钟内完成 |
+| 鉴权 | Bearer API Key（云端） |
+
+**实测结论**
+
+- 同一段 27 秒中文音频：DeepSeek 转写**零错**（whisper turbo 错 2 处：全量→全粮、灰度→挥度），质量与 Qwen3-0.6B 同级。
+- **`/v1/chat/completions` 喂音频走不通**：`input_audio` 直接 422（`unknown variant 'input_audio', expected 'text'/'image_url'/'file'`）。
+  `/v1/models` 里 `deepseek-flash` 的 `input_modalities` 只有 `["text","image"]` —— **没有 audio**，这条路从模型能力上就不存在。
+- 因此 DeepSeek 只能走"独立工具端点"，而且**必须先切段**（120 秒上限）。
+
+**边界（重要）**：云端端点需要 Key，按 §4.5 的判据它属于"有凭证"→ **产品化路径必须走 Agent 中继**（[asr-relay](../../../docs/contracts/asr-relay.md) 的 `apiShape = deepseek-asr`）。
+当前 Meeting CLI 里的 `deepseek-tools` 引擎是**开发/验证通路**：Key 只从 `SDEMO_ASR_API_KEY` 或命令行参数读，不落库、不进日志、不进仓；每次运行都会打印"音频将上传"的警告。
+
 ---
 
 ## 5. 分段、时间戳与语言

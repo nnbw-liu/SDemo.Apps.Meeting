@@ -60,9 +60,10 @@ public sealed class WhisperCppProvider : IAsrProvider, IDisposable
         var started = DateTimeOffset.UtcNow;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var format = WavFormatReader.TryRead(job.AudioPath, out var info, out var error)
-            ? info!
-            : throw new MeetingException(MeetingErrorCodes.AudioUnreadable, $"音频无法解析：{error}");
+        if (!WavFormatReader.TryRead(job.AudioPath, out var info, out var error) || info is null)
+            throw new MeetingException(MeetingErrorCodes.AudioUnreadable, $"音频无法解析：{error}");
+
+        var format = info;
 
         if (!format.IsTarget)
         {

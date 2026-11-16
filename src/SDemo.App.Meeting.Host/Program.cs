@@ -155,7 +155,19 @@ public static class Program
             app.ModelCatalog,
             o.Str("base-url"),
             o.Str("model"),
-            o.Str("whisper-model"));
+            o.Str("whisper-model"),
+            o.Str("api-key") ?? Environment.GetEnvironmentVariable(AsrEngineCatalog.ApiKeyEnvVar),
+            o.Flag("allow-remote"));
+
+        if (provider is ChatAudioProvider chat && !chat.IsLocal)
+        {
+            Console.Error.WriteLine($"[warn] 音频将上传到 {o.Str("base-url")}（云端例外，按场计费）");
+        }
+
+        if (provider is DeepSeekToolsProvider)
+        {
+            Console.Error.WriteLine($"[warn] 音频将上传到 {o.Str("base-url", DeepSeekToolsProvider.DefaultBaseUrl)}（云端例外，按音频小时计费）");
+        }
 
         var availability = provider.Probe();
         if (!availability.Available)
@@ -292,7 +304,10 @@ public static class Program
         用法：
           meeting record      --title "周会" [--seconds 30] [--no-loopback] [--kind weekly]
           meeting import      --audio <wav> [--title "..."] [--transcribe]
-          meeting transcribe  --meeting <id> [--engine whisper-cpp] [--lang zh] [--audio <wav>]
+          meeting transcribe  --meeting <id> [--engine whisper-cpp|chat-audio|deepseek-tools] [--lang zh] [--audio <wav>]
+                              云端 chat ：--base-url https://... --model <id> --allow-remote [--api-key <key>]
+                              云端 tools：--engine deepseek-tools --allow-remote [--api-key <key>]
+                                          （Key 也可放 SDEMO_ASR_API_KEY；≤120 秒 / ≤8 MB，需先切段）
           meeting list        [--limit 20]
           meeting show        <id>
           meeting models

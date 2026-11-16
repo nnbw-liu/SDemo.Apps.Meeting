@@ -73,6 +73,9 @@ public enum AsrEndpointKind
 
     /// <summary>本机回环 HTTP（chat-audio 形态），只允许 127.0.0.1。</summary>
     HttpLoopback,
+
+    /// <summary>公网 HTTP 端点（云端 ASR）。必须显式开启，音频会出本机。</summary>
+    HttpRemote,
 }
 
 public enum AsrWarningCode

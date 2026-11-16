@@ -37,6 +37,34 @@ public sealed class AsrContractTests
             new ChatAudioProvider("http://10.0.0.5:8080", "qwen3-asr"));
 
         Assert.Equal(MeetingErrorCodes.InvalidArgument, ex.Code);
+        Assert.Contains("--allow-remote", ex.Message);
+    }
+
+    [Fact]
+    public void 云端端点显式放行但缺_key_仍然拒绝()
+    {
+        var ex = Assert.Throws<MeetingException>(() =>
+            new ChatAudioProvider("https://api.example.com/v1", "qwen3-asr", allowRemote: true));
+
+        Assert.Equal(MeetingErrorCodes.InvalidArgument, ex.Code);
+        Assert.Contains("API Key", ex.Message);
+    }
+
+    [Fact]
+    public void 云端端点带_key_可以构造且标记为非本地()
+    {
+        using var provider = new ChatAudioProvider(
+            "https://api.example.com/v1", "qwen3-asr", apiKey: "sk-test", allowRemote: true);
+
+        Assert.False(provider.IsLocal);
+        Assert.Equal("https://api.example.com/v1/chat/completions", provider.Endpoint);
+    }
+
+    [Fact]
+    public void 本地回环不需要_key()
+    {
+        using var provider = new ChatAudioProvider("http://127.0.0.1:8080/v1", "qwen3-asr");
+        Assert.True(provider.IsLocal);
     }
 
     [Fact]
@@ -92,6 +120,53 @@ public sealed class AsrContractTests
     {
         var parsed = ChatAudioProvider.ParseResponse("""{"choices":[{"message":{"content":"language None<asr_text>"}}]}""");
         Assert.Equal(string.Empty, parsed.Text);
+    }
+
+    [Fact]
+    public void deepseek_tools_没有_key_直接拒绝()
+    {
+        var ex = Assert.Throws<MeetingException>(() => new DeepSeekToolsProvider(apiKey: null));
+        Assert.Equal(MeetingErrorCodes.InvalidArgument, ex.Code);
+        Assert.Contains("API Key", ex.Message);
+    }
+
+    [Fact]
+    public void deepseek_tools_远端必须显式放行()
+    {
+        var ex = Assert.Throws<MeetingException>(() =>
+            new DeepSeekToolsProvider(apiKey: "sk-test", allowRemote: false));
+
+        Assert.Equal(MeetingErrorCodes.InvalidArgument, ex.Code);
+        Assert.Contains("--allow-remote", ex.Message);
+    }
+
+    [Fact]
+    public void deepseek_tools_解析官方响应()
+    {
+        const string json = """
+            {"request_id":"0b8c1c7e","text":"今天上海的天气怎么样？","duration_ms":3200}
+            """;
+
+        var parsed = DeepSeekToolsProvider.ParseResponse(json);
+
+        Assert.Equal("今天上海的天气怎么样？", parsed.Text);
+        Assert.Equal(3200, parsed.DurationMs);
+        Assert.Equal("0b8c1c7e", parsed.RequestId);
+    }
+
+    [Fact]
+    public async Task deepseek_tools_超过120秒直接拒绝且不发请求()
+    {
+        using var provider = new DeepSeekToolsProvider(apiKey: "sk-test", allowRemote: true);
+
+        var longWav = TestAudio.WriteSilence(
+            Path.Combine(Path.GetTempPath(), "meeting-tests", $"long-{Guid.NewGuid():N}.wav"), seconds: 121);
+
+        var ex = await Assert.ThrowsAsync<MeetingException>(() =>
+            provider.TranscribeAsync(new AsrJob(longWav), progress: null, CancellationToken.None));
+
+        Assert.Equal(MeetingErrorCodes.AudioUnreadable, ex.Code);
+        Assert.Contains("120", ex.Message);
     }
 
     [Fact]
